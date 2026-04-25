@@ -120,21 +120,19 @@ Three Gall agents in one desk:
 
 A normal install runs all three on the same ship. Shim's `node` config picks which ship's `%llmproxy-node` to actually use — same ship (default) or a remote one.
 
-```
-client (curl, Continue, etc.)
-   |
-   | HTTP
-   v
-[ %llmproxy-shim ]   <-- on your ship
-   |
-   | poke + watch over Ames
-   v
-[ %llmproxy-node ]   <-- on the GPU operator's ship
-   |
-   | HTTP via Iris
-   v
-Ollama / vLLM / llama.cpp
-```
+### Single-ship install
+
+You're the only person involved. Shim's `node` defaults to `our.bowl`, so HTTP comes in, gets routed locally between agents, and the node calls Ollama directly.
+
+![Single-ship install](docs/single-ship.svg)
+
+### Two-ship deployment
+
+A publisher runs the GPU; a friend installs the desk and configures their shim's `node` to point at the publisher. The friend's curl never leaves their localhost — the cross-machine hop is Ames doing its thing.
+
+![Two-ship deployment](docs/two-ship.svg)
+
+Source `.dot` files for both diagrams live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
 ## Known limitations
 
