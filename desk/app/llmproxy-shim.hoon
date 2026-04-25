@@ -131,6 +131,131 @@
           [%give %fact ~[pat] %http-response-data !>(`(unit octs)`~)]
           [%give %kick ~[pat] ~]
       ==
+    ::
+    ::  Parse a url-encoded form body via Eyre's query parser.
+    ++  parse-form-body
+      |=  body=@t
+      ^-  (map @t @t)
+      =/  prefixed=@t  (cat 3 '?' body)
+      =/  parsed  (rush prefixed yque:de-purl:html)
+      ?~  parsed  ~
+      (malt u.parsed)
+    ::
+    ::  Trim leading/trailing spaces from a cord.
+    ++  trim-spaces
+      |=  t=@t
+      ^-  @t
+      =/  bytes=(list @)  (rip 3 t)
+      =/  front
+        |-  ^-  (list @)
+        ?~  bytes  ~
+        ?:  =(' ' i.bytes)  $(bytes t.bytes)
+        bytes
+      =/  back
+        =/  rev  (flop front)
+        |-  ^-  (list @)
+        ?~  rev  ~
+        ?:  =(' ' i.rev)  $(rev t.rev)
+        rev
+      (rap 3 (flop back))
+    ::
+    ::  Split CSV → trimmed list, dropping empties.
+    ++  csv-to-list
+      |=  csv=@t
+      ^-  (list @t)
+      =/  bytes=(list @)  (rip 3 csv)
+      =|  out=(list @t)
+      =|  cur=(list @)
+      |-  ^-  (list @t)
+      ?~  bytes
+        =/  trimmed  (trim-spaces (rap 3 (flop cur)))
+        ?:  =('' trimmed)  (flop out)
+        (flop [trimmed out])
+      ?:  =(',' i.bytes)
+        =/  trimmed  (trim-spaces (rap 3 (flop cur)))
+        %=  $
+            bytes  t.bytes
+            cur  ~
+            out  ?:(=('' trimmed) out [trimmed out])
+        ==
+      $(bytes t.bytes, cur [i.bytes cur])
+    ::
+    ::  Render list of models as comma-separated cord.
+    ++  list-to-csv
+      |=  ms=(list @t)
+      ^-  @t
+      ?~  ms  ''
+      ?~  t.ms  i.ms
+      (rap 3 ~[i.ms ', ' $(ms t.ms)])
+    ::
+    ::  Build the config UI page.
+    ++  ui-page
+      |=  [node=@p models=(list @t) msg=@t]
+      ^-  manx
+      =/  ship-text=tape  (scow %p node)
+      =/  models-text=tape  (trip (list-to-csv models))
+      =/  msg-text=tape  (trip msg)
+      =/  css=tape
+        """
+        body \{font-family:-apple-system,system-ui,sans-serif;max-width:680px;margin:2em auto;padding:0 1em;color:#222;line-height:1.5}
+        h1 \{color:#444;border-bottom:1px solid #ccc;padding-bottom:.3em;margin-bottom:.4em}
+        form \{background:#f7f7f5;padding:1em;border-radius:6px;margin:1em 0;border:1px solid #ececec}
+        label \{display:block;margin:.5em 0 .2em;font-weight:600;font-size:.9em;color:#555}
+        input[type=text] \{width:100%;padding:.5em;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:.95em}
+        button \{padding:.5em 1.2em;background:#3aa37a;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600;margin-top:.5em;font-size:.95em}
+        button:hover \{background:#2e8862}
+        .msg \{background:#fff7d8;padding:.7em 1em;border-radius:4px;border-left:3px solid #c9a000;margin:1em 0}
+        dl \{background:#f7f7f5;padding:1em;border-radius:6px;border:1px solid #ececec;margin:1em 0}
+        dt \{font-weight:600;color:#666;font-size:.85em;text-transform:uppercase;letter-spacing:.04em;margin-top:.7em}
+        dt:first-child \{margin-top:0}
+        dd \{margin:.2em 0 0 0;font-family:ui-monospace,Menlo,monospace}
+        small \{color:#888}
+        """
+      ;html
+        ;head
+          ;title: llmproxy config
+          ;meta(charset "utf-8");
+          ;style:"{css}"
+        ==
+        ;body
+          ;h1: llmproxy
+          ;+  ?:  =('' msg)  ;span;
+              ;p(class "msg"):"{msg-text}"
+          ;dl
+            ;dt: node
+            ;dd:"{ship-text}"
+            ;dt: models
+            ;dd:"{models-text}"
+            ;dt: api endpoint
+            ;dd: POST /llmproxy/v1/chat/completions
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "set-node");
+            ;label: route requests to this ship's %llmproxy-node
+            ;br;
+            ;input(type "text", name "node", value "{ship-text}", placeholder "~sampel-palnet", size "60");
+            ;button(type "submit"): update node
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "set-models");
+            ;label: advertise these models at /v1/models (comma-separated)
+            ;br;
+            ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
+            ;button(type "submit"): update models
+          ==
+          ;p
+            ;small: %llmproxy-shim
+          ==
+        ==
+      ==
+    ::
+    ::  Convert a manx to an HTTP 200 text/html simple-payload.
+    ++  manx-response
+      |=  m=manx
+      ^-  simple-payload:http
+      =/  body=@t  (crip (en-xml:html m))
+      :_  `[(met 3 body) body]
+      [200 ~[['content-type'^'text/html; charset=utf-8']]]
     --
 ::
 ^-  agent:gall
@@ -169,6 +294,47 @@
     =+  !<([eyre-id=@ta =inbound-request:eyre] vase)
     =/  =request:http  request.inbound-request
     =/  rl  (parse-request-line:server url.request)
+    ::  GET /llmproxy/ui — config page
+    ?:  ?&  ?=(%'GET' method.request)
+            ?=([%llmproxy %ui ~] site.rl)
+        ==
+      :_  this
+      %+  give-simple-payload:app:server  eyre-id
+      (manx-response (ui-page node.state models.state ''))
+    ::  POST /llmproxy/ui — handle config form submissions
+    ?:  ?&  ?=(%'POST' method.request)
+            ?=([%llmproxy %ui ~] site.rl)
+        ==
+      =/  body=@t
+        ?~  body.request  ''
+        q.u.body.request
+      =/  fields  (parse-form-body body)
+      =/  act  (~(get by fields) 'action')
+      ?:  ?&  ?=(^ act)  =('set-node' u.act)  ==
+        =/  raw  (~(get by fields) 'node')
+        ?:  |(?=(~ raw) =('' u.raw))
+          :_  this
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page node.state models.state 'missing node value'))
+        =/  parsed  (slaw %p u.raw)
+        ?~  parsed
+          :_  this
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page node.state models.state (cat 3 'invalid @p: ' u.raw)))
+        :_  this(node u.parsed)
+        %+  give-simple-payload:app:server  eyre-id
+        (manx-response (ui-page u.parsed models.state 'node updated'))
+      ?:  ?&  ?=(^ act)  =('set-models' u.act)  ==
+        =/  raw  (~(get by fields) 'models')
+        =/  ms=(list @t)
+          ?~  raw  ~
+          (csv-to-list u.raw)
+        :_  this(models ms)
+        %+  give-simple-payload:app:server  eyre-id
+        (manx-response (ui-page node.state ms 'models updated'))
+      :_  this
+      %+  give-simple-payload:app:server  eyre-id
+      (manx-response (ui-page node.state models.state 'unknown action'))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)

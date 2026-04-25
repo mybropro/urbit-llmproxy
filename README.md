@@ -107,6 +107,7 @@ curl -N -X POST http://localhost:80/llmproxy/v1/chat/completions \
 
 - `POST /llmproxy/v1/chat/completions` — chat. Honors `stream` field. Returns SSE if `true`, single JSON otherwise.
 - `GET /llmproxy/v1/models` — list configured models.
+- `GET /llmproxy/ui` — config page. View and update node target / model list with HTML forms instead of dojo pokes. Server-rendered with [Sail](https://docs.urbit.org/hoon/sail), no JS framework, no glob.
 
 ## Architecture
 
