@@ -262,17 +262,24 @@
         """
         body \{font-family:-apple-system,system-ui,sans-serif;max-width:680px;margin:2em auto;padding:0 1em;color:#222;line-height:1.5}
         h1 \{color:#444;border-bottom:1px solid #ccc;padding-bottom:.3em;margin-bottom:.4em}
+        h2 \{color:#444;font-size:1.25em;margin-top:2.2em;margin-bottom:.3em;border-bottom:1px solid #ececec;padding-bottom:.2em}
+        h3 \{color:#666;font-size:1em;margin-top:1.6em;margin-bottom:.2em;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
         form \{background:#f7f7f5;padding:1em;border-radius:6px;margin:1em 0;border:1px solid #ececec}
         label \{display:block;margin:.5em 0 .2em;font-weight:600;font-size:.9em;color:#555}
-        input[type=text] \{width:100%;padding:.5em;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:.95em}
+        input[type=text],select,textarea \{width:100%;padding:.5em;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:.95em}
+        textarea \{resize:vertical;min-height:3em}
         button \{padding:.5em 1.2em;background:#3aa37a;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600;margin-top:.5em;font-size:.95em}
         button:hover \{background:#2e8862}
+        button:disabled \{background:#aaa;cursor:wait}
         .msg \{background:#fff7d8;padding:.7em 1em;border-radius:4px;border-left:3px solid #c9a000;margin:1em 0}
         dl \{background:#f7f7f5;padding:1em;border-radius:6px;border:1px solid #ececec;margin:1em 0}
         dt \{font-weight:600;color:#666;font-size:.85em;text-transform:uppercase;letter-spacing:.04em;margin-top:.7em}
         dt:first-child \{margin-top:0}
-        dd \{margin:.2em 0 0 0;font-family:ui-monospace,Menlo,monospace}
+        dd \{margin:.2em 0 0 0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+        pre \{background:#f7f7f5;border:1px solid #ececec;border-radius:6px;padding:1em;font-family:ui-monospace,Menlo,monospace;font-size:.92em;white-space:pre-wrap;word-wrap:break-word;max-height:400px;overflow:auto;margin:1em 0}
         small \{color:#888}
+        ol li \{margin:.3em 0}
+        code \{background:#eee;padding:.05em .35em;border-radius:3px;font-size:.9em;font-family:ui-monospace,Menlo,monospace}
         """
       ;html
         ;head
