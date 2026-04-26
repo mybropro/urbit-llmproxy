@@ -5,7 +5,7 @@
 ::  then a final fact with done=%.y, then a kick.
 ::
 /-  llmproxy
-/+  default-agent
+/+  default-agent, *llmproxy-helpers
 ::
 |%
 +$  card  card:agent:gall
@@ -28,77 +28,9 @@
 =*  state  -
 ::
 =>  |%
-    ++  build-body
-      |=  [model=@t prompt=@t]
-      ^-  @t
-      =/  jon=json
-        %-  pairs:enjs:format
-        :~  ['model'^s+model]
-            ['stream'^b+%.n]
-            :-  'messages'
-            :-  %a
-            :~  %-  pairs:enjs:format
-                :~  ['role'^s+'user']
-                    ['content'^s+prompt]
-                ==
-            ==
-        ==
-      (en:json:html jon)
-    ::
-    ::  Check whether a ship is allowed to submit a job under this policy.
-    ::  The node's own ship is always allowed, regardless of mode.
-    ++  allowed
-      |=  [src=@p our=@p =access-policy:llmproxy]
-      ^-  ?
-      ?:  =(src our)  &
-      ?-    -.access-policy
-          %whitelist  (~(has in ships.access-policy) src)
-          %blacklist  !(~(has in ships.access-policy) src)
-      ==
-    ::
-    ::  Derive the OpenAI /v1/models URL from the configured /v1/chat/completions URL.
-    ::  If the chat URL doesn't end with /chat/completions we append /models as a fallback.
-    ++  derive-models-url
-      |=  chat-url=@t
-      ^-  @t
-      =/  suffix  '/chat/completions'
-      =/  s-len   (met 3 suffix)
-      =/  u-len   (met 3 chat-url)
-      ?.  (gte u-len s-len)
-        (cat 3 chat-url '/models')
-      =/  end-bytes  (rsh [3 (sub u-len s-len)] chat-url)
-      ?.  =(suffix end-bytes)
-        (cat 3 chat-url '/models')
-      (cat 3 (end [3 (sub u-len s-len)] chat-url) '/models')
-    ::
-    ::  Parse OpenAI-format /v1/models response into a list of model id strings.
-    ++  parse-models-list
-      |=  body=@t
-      ^-  (list @t)
-      =/  jon=(unit json)  (de:json:html body)
-      ?~  jon  ~
-      ?.  ?=([%o *] u.jon)  ~
-      =/  data  (~(get by p.u.jon) 'data')
-      ?~  data  ~
-      ?.  ?=([%a *] u.data)  ~
-      %+  murn  p.u.data
-      |=  =json
-      ^-  (unit @t)
-      ?.  ?=([%o *] json)  ~
-      =/  id  (~(get by p.json) 'id')
-      ?~  id  ~
-      ?.  ?=([%s *] u.id)  ~
-      `p.u.id
-    ::
-    ::  Build header-list with optional Authorization Bearer.
-    ++  build-headers
-      |=  [content-type=(unit @t) api-key=@t]
-      ^-  header-list:http
-      =/  base=header-list:http
-        ?~  content-type  ~
-        ~[['content-type'^u.content-type]]
-      ?:  =('' api-key)  base
-      [['authorization'^(rap 3 ~['Bearer ' api-key])] base]
+    ::  Pure helpers (allowed, build-body, build-headers, derive-models-url,
+    ::  parse-models-list, extract-content) live in /lib/llmproxy-helpers.hoon
+    ::  and are imported via /+ above.
     ::
     ::  Build an Iris GET request card aimed at the backend's /v1/models endpoint.
     ++  refresh-models-card
@@ -111,26 +43,6 @@
             body=~
         ==
       [%pass /refresh-models %arvo %i %request request *outbound-config:iris]
-    ::
-    ::  Extract choices[0].message.content from a non-streaming OpenAI response.
-    ++  extract-content
-      |=  body=@t
-      ^-  @t
-      =/  jon=(unit json)  (de:json:html body)
-      ?~  jon  ''
-      ?.  ?=([%o *] u.jon)  ''
-      =/  c1=(unit json)  (~(get by p.u.jon) 'choices')
-      ?~  c1  ''
-      ?.  ?=([%a *] u.c1)  ''
-      ?~  p.u.c1  ''
-      ?.  ?=([%o *] i.p.u.c1)  ''
-      =/  msg=(unit json)  (~(get by p.i.p.u.c1) 'message')
-      ?~  msg  ''
-      ?.  ?=([%o *] u.msg)  ''
-      =/  cn=(unit json)  (~(get by p.u.msg) 'content')
-      ?~  cn  ''
-      ?.  ?=([%s *] u.cn)  ''
-      p.u.cn
     --
 ::
 ^-  agent:gall

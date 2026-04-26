@@ -118,6 +118,23 @@
   ^-  @t
   (ships-to-csv ~(tap in ships.access-policy))
 ::                                                  ::
+::::                  api base / inbound request    ::
+::                                                  ::
+::  Derive the public-facing base URL ("http(s)://host/llmproxy") from
+::  the inbound request's Host header and `secure` flag.
+++  derive-api-base
+  |=  =inbound-request:eyre
+  ^-  @t
+  =/  hosts
+    %+  skim  header-list.request.inbound-request
+    |=  [k=@t v=@t]
+    =((cass (trip k)) "host")
+  =/  host=@t
+    ?~(hosts 'localhost' value.i.hosts)
+  =/  scheme=@t
+    ?:(secure.inbound-request 'https://' 'http://')
+  (rap 3 ~[scheme host '/llmproxy'])
+::                                                  ::
 ::::                  url-encoded forms             ::
 ::                                                  ::
 ::  Parse a url-encoded form body to a (map @t @t) by reusing Eyre's

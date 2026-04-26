@@ -8,7 +8,7 @@
 ::  Iris buffers the full Ollama response so all chunks arrive at once.
 ::
 /-  llmproxy, hood
-/+  default-agent, server
+/+  default-agent, server, *llmproxy-helpers
 ::
 |%
 +$  card  card:agent:gall
@@ -38,92 +38,11 @@
 =*  state  -
 ::
 =>  |%
-    ::  Parse incoming OpenAI chat-completion request body.
-    ++  parse-openai-request
-      |=  body=@t
-      ^-  (unit [model=@t prompt=@t stream=?])
-      =/  jon=(unit json)  (de:json:html body)
-      ?~  jon  ~
-      ?.  ?=([%o *] u.jon)  ~
-      =/  m=(unit json)  (~(get by p.u.jon) 'model')
-      ?~  m  ~
-      ?.  ?=([%s *] u.m)  ~
-      =/  msgs=(unit json)  (~(get by p.u.jon) 'messages')
-      ?~  msgs  ~
-      ?.  ?=([%a *] u.msgs)  ~
-      ?~  p.u.msgs  ~
-      =/  last=json  (rear p.u.msgs)
-      ?.  ?=([%o *] last)  ~
-      =/  c=(unit json)  (~(get by p.last) 'content')
-      ?~  c  ~
-      ?.  ?=([%s *] u.c)  ~
-      =/  stream=?
-        =/  s=(unit json)  (~(get by p.u.jon) 'stream')
-        ?~  s  %.n
-        ?.(?=([%b *] u.s) %.n p.u.s)
-      `[p.u.m p.u.c stream]
-    ::
-    ::  Build the non-streaming chat.completion JSON response.
-    ++  build-completion-json
-      |=  [model=@t content=@t]
-      ^-  json
-      %-  pairs:enjs:format
-      :~  ['id'^s+'chatcmpl-urbit']
-          ['object'^s+'chat.completion']
-          ['model'^s+model]
-          :-  'choices'
-          :-  %a
-          :~  %-  pairs:enjs:format
-              :~  ['index'^(numb:enjs:format 0)]
-                  :-  'message'
-                  %-  pairs:enjs:format
-                  :~  ['role'^s+'assistant']
-                      ['content'^s+content]
-                  ==
-                  ['finish_reason'^s+'stop']
-              ==
-          ==
-      ==
-    ::
-    ::  Build the SSE body: one delta chunk with full content + [DONE].
-    ++  build-sse-body
-      |=  [model=@t content=@t]
-      ^-  @t
-      =/  delta-jon=json
-        %-  pairs:enjs:format
-        :~  ['object'^s+'chat.completion.chunk']
-            ['model'^s+model]
-            :-  'choices'
-            :-  %a
-            :~  %-  pairs:enjs:format
-                :~  ['index'^(numb:enjs:format 0)]
-                    :-  'delta'
-                    %-  pairs:enjs:format
-                    :~  ['content'^s+content]
-                    ==
-                ==
-            ==
-        ==
-      =/  delta-body=@t  (en:json:html delta-jon)
-      (rap 3 ~['data: ' delta-body '\0a\0a' 'data: [DONE]\0a\0a'])
-    ::
-    ::  Build OpenAI-format /v1/models response.
-    ++  build-models-response
-      |=  models=(list @t)
-      ^-  json
-      %-  pairs:enjs:format
-      :~  ['object'^s+'list']
-          :-  'data'
-          :-  %a
-          %+  turn  models
-          |=  m=@t
-          ^-  json
-          %-  pairs:enjs:format
-          :~  ['id'^s+m]
-              ['object'^s+'model']
-              ['owned_by'^s+'urbit']
-          ==
-      ==
+    ::  Pure helpers (parse-openai-request, build-completion-json,
+    ::  build-sse-body, build-models-response, parse-form-body, trim-spaces,
+    ::  csv-to-list, list-to-csv, ships-to-csv, get-header, bearer-ok,
+    ::  derive-api-base, policy-mode-text, policy-ships-csv) live in
+    ::  /lib/llmproxy-helpers.hoon and are imported via /+ above.
     ::
     ++  sse-cards
       |=  [eyre-id=@ta body=@t]
@@ -139,97 +58,6 @@
           [%give %fact ~[pat] %http-response-data !>(`(unit octs)`~)]
           [%give %kick ~[pat] ~]
       ==
-    ::
-    ::  Parse a url-encoded form body via Eyre's query parser.
-    ++  parse-form-body
-      |=  body=@t
-      ^-  (map @t @t)
-      =/  prefixed=@t  (cat 3 '?' body)
-      =/  parsed  (rush prefixed yque:de-purl:html)
-      ?~  parsed  ~
-      (malt u.parsed)
-    ::
-    ::  Trim leading/trailing spaces from a cord.
-    ++  trim-spaces
-      |=  t=@t
-      ^-  @t
-      =/  bytes=(list @)  (rip 3 t)
-      =/  front
-        |-  ^-  (list @)
-        ?~  bytes  ~
-        ?:  =(' ' i.bytes)  $(bytes t.bytes)
-        bytes
-      =/  back
-        =/  rev  (flop front)
-        |-  ^-  (list @)
-        ?~  rev  ~
-        ?:  =(' ' i.rev)  $(rev t.rev)
-        rev
-      (rap 3 (flop back))
-    ::
-    ::  Split CSV → trimmed list, dropping empties.
-    ++  csv-to-list
-      |=  csv=@t
-      ^-  (list @t)
-      =/  bytes=(list @)  (rip 3 csv)
-      =|  out=(list @t)
-      =|  cur=(list @)
-      |-  ^-  (list @t)
-      ?~  bytes
-        =/  trimmed  (trim-spaces (rap 3 (flop cur)))
-        ?:  =('' trimmed)  (flop out)
-        (flop [trimmed out])
-      ?:  =(',' i.bytes)
-        =/  trimmed  (trim-spaces (rap 3 (flop cur)))
-        %=  $
-            bytes  t.bytes
-            cur  ~
-            out  ?:(=('' trimmed) out [trimmed out])
-        ==
-      $(bytes t.bytes, cur [i.bytes cur])
-    ::
-    ::  Render list of models as comma-separated cord.
-    ++  list-to-csv
-      |=  ms=(list @t)
-      ^-  @t
-      ?~  ms  ''
-      ?~  t.ms  i.ms
-      (rap 3 ~[i.ms ', ' $(ms t.ms)])
-    ::
-    ::  Case-insensitive header lookup.
-    ++  get-header
-      |=  [name=@t headers=header-list:http]
-      ^-  (unit @t)
-      =/  matched
-        %+  skim  headers
-        |=  [k=@t v=@t]
-        =((cass (trip k)) (cass (trip name)))
-      ?~(matched ~ `value.i.matched)
-    ::
-    ::  Returns true iff the request has a matching Bearer token (or no token
-    ::  is configured).
-    ++  bearer-ok
-      |=  [token=@t headers=header-list:http]
-      ^-  ?
-      ?:  =('' token)  &
-      =/  auth  (get-header 'authorization' headers)
-      ?~  auth  %.n
-      =((cat 3 'Bearer ' token) u.auth)
-    ::
-    ::  Derive the public-facing base URL ("http(s)://host/llmproxy") from
-    ::  the inbound request, by inspecting the Host header and secure flag.
-    ++  derive-api-base
-      |=  =inbound-request:eyre
-      ^-  @t
-      =/  hosts
-        %+  skim  header-list.request.inbound-request
-        |=  [k=@t v=@t]
-        =((cass (trip k)) "host")
-      =/  host=@t
-        ?~(hosts 'localhost' value.i.hosts)
-      =/  scheme=@t
-        ?:(secure.inbound-request 'https://' 'http://')
-      (rap 3 ~[scheme host '/llmproxy'])
     ::
     ::  Look up which ship we synced the %llmproxy desk from, via kiln/pikes.
     ::  Falls back to our own @p if no sync record is found (e.g. desk was
@@ -268,28 +96,6 @@
         %+  give-simple-payload:app:server  eid
         (manx-response (ui-page our publisher api-base node models backend backend-key-set client-api-token-set new-pol hosting 'policy updated' '' ''))
       [poke-card http-cards]
-    ::
-    ::  Mode label: "whitelist" or "blacklist".
-    ++  policy-mode-text
-      |=  =access-policy:llmproxy
-      ^-  @t
-      ?-  -.access-policy
-          %whitelist  'whitelist (only listed ships allowed)'
-          %blacklist  'blacklist (everyone except listed)'
-      ==
-    ::
-    ::  Comma-separated list of ships in the policy.
-    ++  policy-ships-csv
-      |=  =access-policy:llmproxy
-      ^-  @t
-      (ships-to-csv ~(tap in ships.access-policy))
-    ::
-    ++  ships-to-csv
-      |=  ships=(list @p)
-      ^-  @t
-      ?~  ships  ''
-      ?~  t.ships  (scot %p i.ships)
-      (rap 3 ~[(scot %p i.ships) ', ' $(ships t.ships)])
     ::
     ::  Build the config UI page.
     ++  ui-page
