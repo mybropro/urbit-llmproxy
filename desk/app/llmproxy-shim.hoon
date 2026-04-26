@@ -430,7 +430,11 @@
                 ;p: To invite a friend:
                 ;ol
                   ;li: Send them your @p above.
-                  ;li:"On their ship: |install {publisher-text} %llmproxy"
+                  ;li
+                    ;span: On their ship:
+                    ;br;
+                    ;code:"|install {publisher-text} %llmproxy"
+                  ==
                   ;li: Have them point their shim's node at your @p via this same form.
                 ==
               ==
