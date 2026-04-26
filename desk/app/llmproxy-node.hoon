@@ -18,6 +18,7 @@
   $:  %0
       backend-url=@t
       policy=access-policy:llmproxy
+      advertised=(list @t)
       pending=(map @ud pending-job)
   ==
 --
@@ -82,7 +83,7 @@
 ::
 ++  on-init
   ^-  (quip card _this)
-  `this(state [%0 'http://localhost:11434/v1/chat/completions' [%whitelist ~] ~])
+  `this(state [%0 'http://localhost:11434/v1/chat/completions' [%whitelist ~] ~['llama3.1:8b'] ~])
 ::
 ++  on-save  !>(state)
 ::
@@ -103,11 +104,16 @@
     =/  cmd
       !<  $%  [%set-backend url=@t]
               [%set-policy =access-policy:llmproxy]
+              [%set-models models=(list @t)]
           ==
       vase
     ?-    -.cmd
         %set-backend  `this(backend-url url.cmd)
         %set-policy   `this(policy access-policy.cmd)
+    ::
+        %set-models
+      :_  this(advertised models.cmd)
+      [%give %fact ~[/models] %llmproxy-models !>(models.cmd)]~
     ==
   ::
       %llmproxy-job
@@ -133,8 +139,11 @@
   |=  =path
   ^-  (quip card _this)
   ?+  path  (on-watch:def path)
-      [%job @ ~]
-    `this
+      [%job @ ~]  `this
+  ::
+      [%models ~]
+    :_  this
+    [%give %fact ~ %llmproxy-models !>(advertised)]~
   ==
 ::
 ++  on-arvo
@@ -164,7 +173,14 @@
   ==
 ::
 ++  on-leave  on-leave:def
-++  on-peek   on-peek:def
+++  on-peek
+  |=  =path
+  ^-  (unit (unit cage))
+  ?+  path  (on-peek:def path)
+      [%x %advertised ~]  ``noun+!>(advertised)
+      [%x %policy ~]      ``noun+!>(policy)
+      [%x %backend ~]     ``noun+!>(backend-url)
+  ==
 ++  on-agent  on-agent:def
 ++  on-fail   on-fail:def
 --

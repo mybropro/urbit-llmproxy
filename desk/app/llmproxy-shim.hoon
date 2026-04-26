@@ -16,6 +16,8 @@
   $:  eyre-id=@ta
       model=@t
       stream=?
+      kind=?(%openai %test)
+      prompt=@t
   ==
 +$  state-0
   $:  %0
@@ -204,7 +206,7 @@
         [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
       =/  http-cards
         %+  give-simple-payload:app:server  eid
-        (manx-response (ui-page our node models backend new-pol 'policy updated'))
+        (manx-response (ui-page our node models backend new-pol 'policy updated' '' ''))
       [poke-card http-cards]
     ::
     ::  Mode label: "whitelist" or "blacklist".
@@ -237,6 +239,8 @@
               backend=@t
               =access-policy:llmproxy
               msg=@t
+              test-prompt=@t
+              test-response=@t
           ==
       ^-  manx
       =/  ship-text=tape  (scow %p node)
@@ -251,6 +255,8 @@
             %blacklist  'whitelist'
         ==
       =/  toggle-label=tape  (trip (cat 3 'switch to ' toggle-target))
+      =/  test-prompt-tape=tape  (trip test-prompt)
+      =/  test-response-tape=tape  (trip test-response)
       =/  msg-text=tape  (trip msg)
       =/  css=tape
         """
@@ -297,13 +303,31 @@
             ;input(type "text", name "node", value "{ship-text}", placeholder "~sampel-palnet", size "60");
             ;button(type "submit"): update node
           ==
-          ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "set-models");
-            ;label: advertise these models at /v1/models (comma-separated)
-            ;br;
-            ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
-            ;button(type "submit"): update models
+          ;p
+            ;small: Models auto-populate from the node when you change it. To change what's offered, ask the node operator.
           ==
+          ;h2: Test
+          ;p
+            ;small: Send a prompt through to confirm the connection works.
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "test");
+            ;label: model
+            ;br;
+            ;select(name "model")
+              ;*  %+  turn  models
+                  |=  m=@t
+                  =/  mt=tape  (trip m)
+                  ;option(value "{mt}"):"{mt}"
+            ==
+            ;label: prompt
+            ;br;
+            ;textarea(name "prompt", rows "3", cols "60"):"{test-prompt-tape}"
+            ;br;
+            ;button(type "submit"): send
+          ==
+          ;+  ?:  =('' test-response)  ;span;
+              ;pre:"{test-response-tape}"
           ;h2: Host a node
           ;p
             ;small: Let other ships run inference on your hardware.
@@ -324,6 +348,13 @@
             ;br;
             ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
             ;button(type "submit"): update backend
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "set-advertised-models");
+            ;label: models you advertise to clients (comma-separated)
+            ;br;
+            ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
+            ;button(type "submit"): update advertised models
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "toggle-policy-mode");
@@ -369,13 +400,15 @@
         :*  %0
             nonce=0
             node=our.bowl
-            models=~['llama3.1:8b']
+            models=~
             backend='http://localhost:11434/v1/chat/completions'
             policy=`access-policy:llmproxy`[%whitelist ~]
             pending=~
         ==
       ==
-  [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]~
+  :~  [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]
+      [%pass /models %agent [our.bowl %llmproxy-node] %watch /models]
+  ==
 ::
 ++  on-save  !>(state)
 ::
@@ -386,7 +419,13 @@
   ?~  loaded
     ~&  >>  %llmproxy-shim-reset-state
     on-init
-  `this(state u.loaded)
+  ::  Re-emit /models watch so we get the current list. (Cheap: leaving
+  ::  a non-existent sub is a no-op; this handles the install-time race
+  ::  where shim started watching before the node was up.)
+  :_  this(state u.loaded)
+  :~  [%pass /models %agent [node.u.loaded %llmproxy-node] %leave ~]
+      [%pass /models %agent [node.u.loaded %llmproxy-node] %watch /models]
+  ==
 ::
 ++  on-poke
   |=  [=mark =vase]
@@ -409,7 +448,8 @@
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state ''))
+      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state '' '' ''))
+    ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
             ?=([%llmproxy %ui ~] site.rl)
@@ -424,34 +464,43 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing node value'))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing node value' '' ''))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw)))
-        :_  this(node u.parsed)
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw) '' ''))
+        =/  resub-cards=(list card)
+          :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
+              [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
+          ==
+        :_  this(node u.parsed, models ~)
+        %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl u.parsed models.state backend.state policy.state 'node updated'))
-      ?:  ?&  ?=(^ act)  =('set-models' u.act)  ==
+        (manx-response (ui-page our.bowl u.parsed ~ backend.state policy.state 'node updated; fetching models' '' ''))
+      ?:  ?&  ?=(^ act)  =('set-advertised-models' u.act)  ==
         =/  raw  (~(get by fields) 'models')
         =/  ms=(list @t)
           ?~  raw  ~
           (csv-to-list u.raw)
-        :_  this(models ms)
-        %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl node.state ms backend.state policy.state 'models updated'))
+        =/  poke-card=card
+          [%pass /set-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-models ms])]
+        =/  http-cards
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page our.bowl node.state ms backend.state policy.state 'advertised models updated' '' ''))
+        :_  this
+        [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
         =/  raw  (~(get by fields) 'backend')
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing backend url'))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing backend url' '' ''))
         =/  poke-card=card
           [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state u.raw policy.state 'backend updated'))
+          (manx-response (ui-page our.bowl node.state models.state u.raw policy.state 'backend updated' '' ''))
         :_  this(backend u.raw)
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('toggle-policy-mode' u.act)  ==
@@ -477,9 +526,32 @@
           ==
         :_  this(policy np)
         (policy-cards our.bowl eyre-id np node.state models.state backend.state)
+      ?:  ?&  ?=(^ act)  =('test' u.act)  ==
+        =/  prompt-raw  (~(get by fields) 'prompt')
+        =/  model-raw  (~(get by fields) 'model')
+        ?:  |(?=(~ prompt-raw) =('' u.prompt-raw))
+          :_  this
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'enter a prompt to test' '' ''))
+        =/  model=@t
+          ?~  model-raw
+            ?~  models.state  'llama3.1:8b'
+            i.models.state
+          u.model-raw
+        =/  n=@ud  +(nonce.state)
+        =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
+        =/  jr=job-req:llmproxy  [jid model u.prompt-raw]
+        =/  pat=path  /job/(scot %ud n)
+        :_  %=  this
+                nonce    n
+                pending  (~(put by pending.state) n [eyre-id model %.n %test u.prompt-raw])
+            ==
+        :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
+            [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
+        ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'unknown action'))
+      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'unknown action' '' ''))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
@@ -504,7 +576,7 @@
       =/  pat=path  /job/(scot %ud n)
       :_  %=  this
               nonce    n
-              pending  (~(put by pending.state) n [eyre-id model.u.parsed stream.u.parsed])
+              pending  (~(put by pending.state) n [eyre-id model.u.parsed stream.u.parsed %openai prompt.u.parsed])
           ==
       :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -524,6 +596,26 @@
   |=  [=wire =sign:agent:gall]
   ^-  (quip card _this)
   ?+    wire  (on-agent:def wire sign)
+      [%models ~]
+    ?+    -.sign  (on-agent:def wire sign)
+        %watch-ack
+      ?~  p.sign  `this
+      ~&  >>>  [%shim-models-watch-failed u.p.sign]
+      `this
+    ::
+        %kick
+      ::  Resubscribe.
+      :_  this
+      [%pass /models %agent [node.state %llmproxy-node] %watch /models]~
+    ::
+        %fact
+      ?+  p.cage.sign  `this
+          %llmproxy-models
+        =/  ms  !<((list @t) q.cage.sign)
+        `this(models ms)
+      ==
+    ==
+  ::
       [%poke @ ~]
     ?+  -.sign  (on-agent:def wire sign)
         %poke-ack
@@ -561,9 +653,26 @@
         ::  Final fact only fires once with done=%.y. Build the response.
         ?.  done.tc  `this
         =/  cards=(list card)
-          ?:  stream.u.rec
-            (sse-cards eid (build-sse-body model.u.rec text.tc))
-          (give-simple-payload:app:server eid (json-response:gen:server (build-completion-json model.u.rec text.tc)))
+          ?-    kind.u.rec
+              %openai
+            ?:  stream.u.rec
+              (sse-cards eid (build-sse-body model.u.rec text.tc))
+            (give-simple-payload:app:server eid (json-response:gen:server (build-completion-json model.u.rec text.tc)))
+          ::
+              %test
+            %+  give-simple-payload:app:server  eid
+            %-  manx-response
+            %:  ui-page
+              our.bowl
+              node.state
+              models.state
+              backend.state
+              policy.state
+              'test response below'
+              prompt.u.rec
+              text.tc
+            ==
+          ==
         =/  leave-card=card
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %leave ~]
         :_  this(pending (~(del by pending.state) n))
