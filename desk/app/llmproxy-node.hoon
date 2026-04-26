@@ -87,6 +87,10 @@
   |=  [=mark =vase]
   ^-  (quip card _this)
   ?+  mark  (on-poke:def mark vase)
+      %noun
+    =/  cmd  !<([%set-backend url=@t] vase)
+    `this(backend-url url.cmd)
+  ::
       %llmproxy-job
     =/  jr  !<(job-req:llmproxy vase)
     =/  body=@t  (build-body model.jr prompt.jr)

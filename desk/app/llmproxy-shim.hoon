@@ -22,6 +22,7 @@
       nonce=@ud
       node=@p
       models=(list @t)
+      backend=@t
       pending=(map @ud pending-shim)
   ==
 --
@@ -190,10 +191,12 @@
     ::
     ::  Build the config UI page.
     ++  ui-page
-      |=  [node=@p models=(list @t) msg=@t]
+      |=  [our=@p node=@p models=(list @t) backend=@t msg=@t]
       ^-  manx
       =/  ship-text=tape  (scow %p node)
+      =/  our-text=tape  (scow %p our)
       =/  models-text=tape  (trip (list-to-csv models))
+      =/  backend-text=tape  (trip backend)
       =/  msg-text=tape  (trip msg)
       =/  css=tape
         """
@@ -221,6 +224,10 @@
           ;h1: llmproxy
           ;+  ?:  =('' msg)  ;span;
               ;p(class "msg"):"{msg-text}"
+          ;h2: Use as a client
+          ;p
+            ;small: Send chat requests through this ship to a node operator.
+          ==
           ;dl
             ;dt: node
             ;dd:"{ship-text}"
@@ -242,6 +249,29 @@
             ;br;
             ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
             ;button(type "submit"): update models
+          ==
+          ;h2: Host a node
+          ;p
+            ;small: Let other ships run inference on your hardware.
+          ==
+          ;dl
+            ;dt: your @p
+            ;dd:"{our-text}"
+            ;dt: ollama backend
+            ;dd:"{backend-text}"
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "set-backend");
+            ;label: where your local OpenAI-compatible inference server lives
+            ;br;
+            ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
+            ;button(type "submit"): update backend
+          ==
+          ;p: To invite a friend:
+          ;ol
+            ;li: Send them your @p above.
+            ;li:"On their ship: |install {our-text} %llmproxy"
+            ;li: Have them point their shim's node at your @p via this same form.
           ==
           ;p
             ;small: %llmproxy-shim
@@ -265,7 +295,7 @@
 ::
 ++  on-init
   ^-  (quip card _this)
-  :_  this(state [%0 0 our.bowl ~['llama3.1:8b'] ~])
+  :_  this(state [%0 0 our.bowl ~['llama3.1:8b'] 'http://localhost:11434/v1/chat/completions' ~])
   [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]~
 ::
 ++  on-save  !>(state)
@@ -300,7 +330,7 @@
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page node.state models.state ''))
+      (manx-response (ui-page our.bowl node.state models.state backend.state ''))
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
             ?=([%llmproxy %ui ~] site.rl)
@@ -315,15 +345,15 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page node.state models.state 'missing node value'))
+          (manx-response (ui-page our.bowl node.state models.state backend.state 'missing node value'))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page node.state models.state (cat 3 'invalid @p: ' u.raw)))
+          (manx-response (ui-page our.bowl node.state models.state backend.state (cat 3 'invalid @p: ' u.raw)))
         :_  this(node u.parsed)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page u.parsed models.state 'node updated'))
+        (manx-response (ui-page our.bowl u.parsed models.state backend.state 'node updated'))
       ?:  ?&  ?=(^ act)  =('set-models' u.act)  ==
         =/  raw  (~(get by fields) 'models')
         =/  ms=(list @t)
@@ -331,10 +361,23 @@
           (csv-to-list u.raw)
         :_  this(models ms)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page node.state ms 'models updated'))
+        (manx-response (ui-page our.bowl node.state ms backend.state 'models updated'))
+      ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
+        =/  raw  (~(get by fields) 'backend')
+        ?:  |(?=(~ raw) =('' u.raw))
+          :_  this
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page our.bowl node.state models.state backend.state 'missing backend url'))
+        =/  poke-card=card
+          [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
+        =/  http-cards
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page our.bowl node.state models.state u.raw 'backend updated'))
+        :_  this(backend u.raw)
+        [poke-card http-cards]
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page node.state models.state 'unknown action'))
+      (manx-response (ui-page our.bowl node.state models.state backend.state 'unknown action'))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
