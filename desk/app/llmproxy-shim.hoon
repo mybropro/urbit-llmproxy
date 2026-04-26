@@ -334,15 +334,15 @@
               ;p(class "msg"):"{msg-text}"
           ;h2: Use as a client
           ;p
-            ;small: Send chat requests through this ship to a node operator.
+            ;small: Use the URL below in OpenCode, AtomicChat, or any app that wants an OpenAI-compatible endpoint. Requests are routed through this ship to a node operator's hardware.
           ==
           ;dl
+            ;dt: api endpoint
+            ;dd:"POST {api-base-text}/v1/chat/completions"
             ;dt: node
             ;dd:"{ship-text}"
             ;dt: models
             ;dd:"{models-text}"
-            ;dt: api endpoint
-            ;dd:"POST {api-base-text}/v1/chat/completions"
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-node");
