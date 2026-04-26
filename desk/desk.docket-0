@@ -1,0 +1,10 @@
+:~
+  title+'llmproxy'
+  info+'OpenAI-compatible LLM proxy over Ames. Click to configure.'
+  color+0x3a.a37a
+  site+/llmproxy/ui
+  base+'llmproxy'
+  version+[0 0 4]
+  license+'MIT'
+  website+'https://github.com/mybropro/urbit-llmproxy'
+==
