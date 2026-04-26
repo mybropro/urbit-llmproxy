@@ -7,7 +7,7 @@
 ::  Streaming caveat: returns properly-formed SSE when stream=true, but
 ::  Iris buffers the full Ollama response so all chunks arrive at once.
 ::
-/-  llmproxy
+/-  llmproxy, hood
 /+  default-agent, server
 ::
 |%
@@ -192,9 +192,26 @@
       ?~  t.ms  i.ms
       (rap 3 ~[i.ms ', ' $(ms t.ms)])
     ::
+    ::  Look up which ship we synced the %llmproxy desk from, via kiln/pikes.
+    ::  Falls back to our own @p if no sync record is found (e.g. desk was
+    ::  authored locally rather than installed from another ship).
+    ++  pub-of-llmproxy
+      |=  [our=@p now=@da]
+      ^-  @p
+      =/  scried=(unit pikes:hood)
+        %-  mole
+        |.
+        .^(pikes:hood %gx /(scot %p our)/hood/(scot %da now)/kiln/pikes/noun)
+      ?~  scried  our
+      =/  pike  (~(get by u.scried) %llmproxy)
+      ?~  pike  our
+      ?~  sync.u.pike  our
+      ship.u.sync.u.pike
+    ::
     ::  Build the cards to apply a new policy: poke node, render UI.
     ++  policy-cards
       |=  $:  our=@p
+              publisher=@p
               eid=@ta
               new-pol=access-policy:llmproxy
               node=@p
@@ -206,7 +223,7 @@
         [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
       =/  http-cards
         %+  give-simple-payload:app:server  eid
-        (manx-response (ui-page our node models backend new-pol 'policy updated' '' ''))
+        (manx-response (ui-page our publisher node models backend new-pol 'policy updated' '' ''))
       [poke-card http-cards]
     ::
     ::  Mode label: "whitelist" or "blacklist".
@@ -234,6 +251,7 @@
     ::  Build the config UI page.
     ++  ui-page
       |=  $:  our=@p
+              publisher=@p
               node=@p
               models=(list @t)
               backend=@t
@@ -245,6 +263,7 @@
       ^-  manx
       =/  ship-text=tape  (scow %p node)
       =/  our-text=tape  (scow %p our)
+      =/  publisher-text=tape  (scow %p publisher)
       =/  models-text=tape  (trip (list-to-csv models))
       =/  backend-text=tape  (trip backend)
       =/  policy-mode=tape  (trip (policy-mode-text access-policy))
@@ -383,7 +402,7 @@
           ;p: To invite a friend:
           ;ol
             ;li: Send them your @p above.
-            ;li:"On their ship: |install {our-text} %llmproxy"
+            ;li:"On their ship: |install {publisher-text} %llmproxy"
             ;li: Have them point their shim's node at your @p via this same form.
           ==
           ;p
@@ -470,7 +489,7 @@
         ?~(scried models.state u.scried)
       :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state fresh-models backend.state policy.state '' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state fresh-models backend.state policy.state '' '' ''))
     ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
@@ -486,12 +505,12 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing node value' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'missing node value' '' ''))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw) '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw) '' ''))
         =/  resub-cards=(list card)
           :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
               [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
@@ -511,13 +530,13 @@
         :_  this(node u.parsed, models fresh-models)
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl u.parsed fresh-models backend.state policy.state 'node updated' '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) u.parsed fresh-models backend.state policy.state 'node updated' '' ''))
       ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
           [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'refreshing models from backend...' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
@@ -525,12 +544,12 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing backend url' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'missing backend url' '' ''))
         =/  poke-card=card
           [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state u.raw policy.state 'backend updated' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state u.raw policy.state 'backend updated' '' ''))
         :_  this(backend u.raw)
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('toggle-policy-mode' u.act)  ==
@@ -540,7 +559,7 @@
               %blacklist  [%whitelist ships.policy.state]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl eyre-id np node.state models.state backend.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) eyre-id np node.state models.state backend.state)
       ?:  ?&  ?=(^ act)  =('set-policy-ships' u.act)  ==
         =/  raw  (~(get by fields) 'ships')
         =/  ship-strs=(list @t)
@@ -555,14 +574,14 @@
               %blacklist  [%blacklist ships]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl eyre-id np node.state models.state backend.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) eyre-id np node.state models.state backend.state)
       ?:  ?&  ?=(^ act)  =('test' u.act)  ==
         =/  prompt-raw  (~(get by fields) 'prompt')
         =/  model-raw  (~(get by fields) 'model')
         ?:  |(?=(~ prompt-raw) =('' u.prompt-raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'enter a prompt to test' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'enter a prompt to test' '' ''))
         =/  model=@t
           ?~  model-raw
             ?~  models.state  'llama3.1:8b'
@@ -581,7 +600,7 @@
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'unknown action' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'unknown action' '' ''))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
@@ -703,6 +722,7 @@
             %-  manx-response
             %:  ui-page
               our.bowl
+              (pub-of-llmproxy our.bowl now.bowl)
               node.state
               models.state
               backend.state
