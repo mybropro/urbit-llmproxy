@@ -18,6 +18,7 @@
       stream=?
       kind=?(%openai %test)
       prompt=@t
+      api-base=@t
   ==
 +$  state-0
   $:  %0
@@ -26,6 +27,7 @@
       models=(list @t)
       backend=@t
       policy=access-policy:llmproxy
+      hosting=?
       pending=(map @ud pending-shim)
   ==
 --
@@ -192,6 +194,21 @@
       ?~  t.ms  i.ms
       (rap 3 ~[i.ms ', ' $(ms t.ms)])
     ::
+    ::  Derive the public-facing base URL ("http(s)://host/llmproxy") from
+    ::  the inbound request, by inspecting the Host header and secure flag.
+    ++  derive-api-base
+      |=  =inbound-request:eyre
+      ^-  @t
+      =/  hosts
+        %+  skim  header-list.request.inbound-request
+        |=  [k=@t v=@t]
+        =((cass (trip k)) "host")
+      =/  host=@t
+        ?~(hosts 'localhost' value.i.hosts)
+      =/  scheme=@t
+        ?:(secure.inbound-request 'https://' 'http://')
+      (rap 3 ~[scheme host '/llmproxy'])
+    ::
     ::  Look up which ship we synced the %llmproxy desk from, via kiln/pikes.
     ::  Falls back to our own @p if no sync record is found (e.g. desk was
     ::  authored locally rather than installed from another ship).
@@ -212,18 +229,20 @@
     ++  policy-cards
       |=  $:  our=@p
               publisher=@p
+              api-base=@t
               eid=@ta
               new-pol=access-policy:llmproxy
               node=@p
               models=(list @t)
               backend=@t
+              hosting=?
           ==
       ^-  (list card)
       =/  poke-card=card
         [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
       =/  http-cards
         %+  give-simple-payload:app:server  eid
-        (manx-response (ui-page our publisher node models backend new-pol 'policy updated' '' ''))
+        (manx-response (ui-page our publisher api-base node models backend new-pol hosting 'policy updated' '' ''))
       [poke-card http-cards]
     ::
     ::  Mode label: "whitelist" or "blacklist".
@@ -252,10 +271,12 @@
     ++  ui-page
       |=  $:  our=@p
               publisher=@p
+              api-base=@t
               node=@p
               models=(list @t)
               backend=@t
               =access-policy:llmproxy
+              hosting=?
               msg=@t
               test-prompt=@t
               test-response=@t
@@ -264,6 +285,7 @@
       =/  ship-text=tape  (scow %p node)
       =/  our-text=tape  (scow %p our)
       =/  publisher-text=tape  (scow %p publisher)
+      =/  api-base-text=tape  (trip api-base)
       =/  models-text=tape  (trip (list-to-csv models))
       =/  backend-text=tape  (trip backend)
       =/  policy-mode=tape  (trip (policy-mode-text access-policy))
@@ -320,7 +342,7 @@
             ;dt: models
             ;dd:"{models-text}"
             ;dt: api endpoint
-            ;dd: POST /llmproxy/v1/chat/completions
+            ;dd:"POST {api-base-text}/v1/chat/completions"
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-node");
@@ -358,53 +380,60 @@
           ;p
             ;small: Let other ships run inference on your hardware.
           ==
-          ;dl
-            ;dt: your @p
-            ;dd:"{our-text}"
-            ;dt: ollama backend
-            ;dd:"{backend-text}"
-          ==
           ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "set-backend");
-            ;label: where your local OpenAI-compatible inference server lives
-            ;br;
-            ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
-            ;button(type "submit"): update backend
+            ;input(type "hidden", name "action", value "toggle-hosting");
+            ;button(type "submit"):"{?:(hosting "turn off hosting" "turn on hosting")}"
           ==
-          ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "refresh-models");
-            ;p
-              ;small: Models are auto-discovered from your backend's /v1/models endpoint when you change the backend URL. Click below if your backend's model list has changed.
-            ==
-            ;button(type "submit"): refresh models from backend
-          ==
-          ;h3: Access permissions
-          ;p
-            ;small: Decide which ships are allowed to submit jobs to your node. Your own ship is always allowed.
-          ==
-          ;dl
-            ;dt: mode
-            ;dd:"{policy-mode}"
-            ;dt: ships
-            ;dd:"{policy-ships}"
-          ==
-          ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "toggle-policy-mode");
-            ;button(type "submit"):"{toggle-label}"
-          ==
-          ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "set-policy-ships");
-            ;label: ships (comma-separated @ps; replaces the whole list)
-            ;br;
-            ;input(type "text", name "ships", value "{policy-ships}", placeholder "~zod, ~nec", size "60");
-            ;button(type "submit"): update ships
-          ==
-          ;p: To invite a friend:
-          ;ol
-            ;li: Send them your @p above.
-            ;li:"On their ship: |install {publisher-text} %llmproxy"
-            ;li: Have them point their shim's node at your @p via this same form.
-          ==
+          ;+  ?.  hosting  ;span;
+              ;div
+                ;dl
+                  ;dt: your @p
+                  ;dd:"{our-text}"
+                  ;dt: ollama backend
+                  ;dd:"{backend-text}"
+                ==
+                ;form(method "post", action "/llmproxy/ui")
+                  ;input(type "hidden", name "action", value "set-backend");
+                  ;label: where your local OpenAI-compatible inference server lives
+                  ;br;
+                  ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
+                  ;button(type "submit"): update backend
+                ==
+                ;form(method "post", action "/llmproxy/ui")
+                  ;input(type "hidden", name "action", value "refresh-models");
+                  ;p
+                    ;small: Models are auto-discovered from your backend's /v1/models endpoint when you change the backend URL. Click below if your backend's model list has changed.
+                  ==
+                  ;button(type "submit"): refresh models from backend
+                ==
+                ;h3: Access permissions
+                ;p
+                  ;small: Decide which ships are allowed to submit jobs to your node. Your own ship is always allowed.
+                ==
+                ;dl
+                  ;dt: mode
+                  ;dd:"{policy-mode}"
+                  ;dt: ships
+                  ;dd:"{policy-ships}"
+                ==
+                ;form(method "post", action "/llmproxy/ui")
+                  ;input(type "hidden", name "action", value "toggle-policy-mode");
+                  ;button(type "submit"):"{toggle-label}"
+                ==
+                ;form(method "post", action "/llmproxy/ui")
+                  ;input(type "hidden", name "action", value "set-policy-ships");
+                  ;label: ships (comma-separated @ps; replaces the whole list)
+                  ;br;
+                  ;input(type "text", name "ships", value "{policy-ships}", placeholder "~zod, ~nec", size "60");
+                  ;button(type "submit"): update ships
+                ==
+                ;p: To invite a friend:
+                ;ol
+                  ;li: Send them your @p above.
+                  ;li:"On their ship: |install {publisher-text} %llmproxy"
+                  ;li: Have them point their shim's node at your @p via this same form.
+                ==
+              ==
           ;p
             ;small: %llmproxy-shim
           ==
@@ -435,6 +464,7 @@
             models=~
             backend='http://localhost:11434/v1/chat/completions'
             policy=`access-policy:llmproxy`[%whitelist ~]
+            hosting=%.n
             pending=~
         ==
       ==
@@ -474,6 +504,7 @@
     =+  !<([eyre-id=@ta =inbound-request:eyre] vase)
     =/  =request:http  request.inbound-request
     =/  rl  (parse-request-line:server url.request)
+    =/  api-base=@t  (derive-api-base inbound-request)
     ::  GET /llmproxy/ui — config page
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %ui ~] site.rl)
@@ -489,7 +520,7 @@
         ?~(scried models.state u.scried)
       :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state fresh-models backend.state policy.state '' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state fresh-models backend.state policy.state hosting.state '' '' ''))
     ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
@@ -505,12 +536,12 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'missing node value' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'missing node value' '' ''))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw) '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state (cat 3 'invalid @p: ' u.raw) '' ''))
         =/  resub-cards=(list card)
           :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
               [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
@@ -530,13 +561,13 @@
         :_  this(node u.parsed, models fresh-models)
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) u.parsed fresh-models backend.state policy.state 'node updated' '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state policy.state hosting.state 'node updated' '' ''))
       ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
           [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'refreshing models from backend...' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
@@ -544,14 +575,32 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'missing backend url' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'missing backend url' '' ''))
         =/  poke-card=card
           [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state u.raw policy.state 'backend updated' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state u.raw policy.state hosting.state 'backend updated' '' ''))
         :_  this(backend u.raw)
         [poke-card http-cards]
+      ?:  ?&  ?=(^ act)  =('toggle-hosting' u.act)  ==
+        =/  new-hosting=?  !hosting.state
+        :_  this(hosting new-hosting)
+        %+  give-simple-payload:app:server  eyre-id
+        %-  manx-response
+        %:  ui-page
+          our.bowl
+          (pub-of-llmproxy our.bowl now.bowl)
+          api-base
+          node.state
+          models.state
+          backend.state
+          policy.state
+          new-hosting
+          ?:(new-hosting 'hosting on' 'hosting off')
+          ''
+          ''
+        ==
       ?:  ?&  ?=(^ act)  =('toggle-policy-mode' u.act)  ==
         =/  np=access-policy:llmproxy
           ?-  -.policy.state
@@ -559,7 +608,7 @@
               %blacklist  [%whitelist ships.policy.state]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) eyre-id np node.state models.state backend.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state hosting.state)
       ?:  ?&  ?=(^ act)  =('set-policy-ships' u.act)  ==
         =/  raw  (~(get by fields) 'ships')
         =/  ship-strs=(list @t)
@@ -574,14 +623,14 @@
               %blacklist  [%blacklist ships]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) eyre-id np node.state models.state backend.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state hosting.state)
       ?:  ?&  ?=(^ act)  =('test' u.act)  ==
         =/  prompt-raw  (~(get by fields) 'prompt')
         =/  model-raw  (~(get by fields) 'model')
         ?:  |(?=(~ prompt-raw) =('' u.prompt-raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'enter a prompt to test' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'enter a prompt to test' '' ''))
         =/  model=@t
           ?~  model-raw
             ?~  models.state  'llama3.1:8b'
@@ -593,14 +642,14 @@
         =/  pat=path  /job/(scot %ud n)
         :_  %=  this
                 nonce    n
-                pending  (~(put by pending.state) n [eyre-id model %.n %test u.prompt-raw])
+                pending  (~(put by pending.state) n [eyre-id model %.n %test u.prompt-raw api-base])
             ==
         :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
             [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) node.state models.state backend.state policy.state 'unknown action' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'unknown action' '' ''))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
@@ -634,7 +683,7 @@
       =/  pat=path  /job/(scot %ud n)
       :_  %=  this
               nonce    n
-              pending  (~(put by pending.state) n [eyre-id model.u.parsed stream.u.parsed %openai prompt.u.parsed])
+              pending  (~(put by pending.state) n [eyre-id model.u.parsed stream.u.parsed %openai prompt.u.parsed api-base])
           ==
       :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -723,10 +772,12 @@
             %:  ui-page
               our.bowl
               (pub-of-llmproxy our.bowl now.bowl)
+              api-base.u.rec
               node.state
               models.state
               backend.state
               policy.state
+              hosting.state
               'test response below'
               prompt.u.rec
               text.tc
