@@ -446,9 +446,18 @@
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %ui ~] site.rl)
         ==
-      :_  this
+      =/  fresh-models=(list @t)
+        ?.  =(node.state our.bowl)  models.state
+        =/  scried=(unit (list @t))
+          %-  mole
+          |.
+          .^  (list @t)  %gx
+              /(scot %p our.bowl)/llmproxy-node/(scot %da now.bowl)/advertised/noun
+          ==
+        ?~(scried models.state u.scried)
+      :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state '' '' ''))
+      (manx-response (ui-page our.bowl node.state fresh-models backend.state policy.state '' '' ''))
     ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
@@ -556,9 +565,18 @@
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
         ==
-      :_  this
+      =/  fresh-models=(list @t)
+        ?.  =(node.state our.bowl)  models.state
+        =/  scried=(unit (list @t))
+          %-  mole
+          |.
+          .^  (list @t)  %gx
+              /(scot %p our.bowl)/llmproxy-node/(scot %da now.bowl)/advertised/noun
+          ==
+        ?~(scried models.state u.scried)
+      :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (json-response:gen:server (build-models-response models.state))
+      (json-response:gen:server (build-models-response fresh-models))
     ::  POST /llmproxy/v1/chat/completions
     ?:  ?&  ?=(%'POST' method.request)
             ?=([%llmproxy %v1 %chat %completions ~] site.rl)
