@@ -310,7 +310,7 @@
           ;p
             ;small: Send a prompt through to confirm the connection works.
           ==
-          ;form(method "post", action "/llmproxy/ui")
+          ;form(method "post", action "/llmproxy/ui", onsubmit "var b=this.querySelector('button');b.disabled=true;b.textContent='waiting for response...';")
             ;input(type "hidden", name "action", value "test");
             ;label: model
             ;br;
