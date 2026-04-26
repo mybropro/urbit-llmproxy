@@ -353,11 +353,11 @@
             ;button(type "submit"): update backend
           ==
           ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "set-advertised-models");
-            ;label: models you advertise to clients (comma-separated)
-            ;br;
-            ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
-            ;button(type "submit"): update advertised models
+            ;input(type "hidden", name "action", value "refresh-models");
+            ;p
+              ;small: Models are auto-discovered from your backend's /v1/models endpoint when you change the backend URL. Click below if your backend's model list has changed.
+            ==
+            ;button(type "submit"): refresh models from backend
           ==
           ;h3: Access permissions
           ;p
@@ -512,16 +512,12 @@
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
         (manx-response (ui-page our.bowl u.parsed fresh-models backend.state policy.state 'node updated' '' ''))
-      ?:  ?&  ?=(^ act)  =('set-advertised-models' u.act)  ==
-        =/  raw  (~(get by fields) 'models')
-        =/  ms=(list @t)
-          ?~  raw  ~
-          (csv-to-list u.raw)
+      ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
-          [%pass /set-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-models ms])]
+          [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state ms backend.state policy.state 'advertised models updated' '' ''))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==

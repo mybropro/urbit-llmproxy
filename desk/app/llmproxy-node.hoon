@@ -55,6 +55,52 @@
           %blacklist  !(~(has in ships.access-policy) src)
       ==
     ::
+    ::  Derive the OpenAI /v1/models URL from the configured /v1/chat/completions URL.
+    ::  If the chat URL doesn't end with /chat/completions we append /models as a fallback.
+    ++  derive-models-url
+      |=  chat-url=@t
+      ^-  @t
+      =/  suffix  '/chat/completions'
+      =/  s-len   (met 3 suffix)
+      =/  u-len   (met 3 chat-url)
+      ?.  (gte u-len s-len)
+        (cat 3 chat-url '/models')
+      =/  end-bytes  (rsh [3 (sub u-len s-len)] chat-url)
+      ?.  =(suffix end-bytes)
+        (cat 3 chat-url '/models')
+      (cat 3 (end [3 (sub u-len s-len)] chat-url) '/models')
+    ::
+    ::  Parse OpenAI-format /v1/models response into a list of model id strings.
+    ++  parse-models-list
+      |=  body=@t
+      ^-  (list @t)
+      =/  jon=(unit json)  (de:json:html body)
+      ?~  jon  ~
+      ?.  ?=([%o *] u.jon)  ~
+      =/  data  (~(get by p.u.jon) 'data')
+      ?~  data  ~
+      ?.  ?=([%a *] u.data)  ~
+      %+  murn  p.u.data
+      |=  =json
+      ^-  (unit @t)
+      ?.  ?=([%o *] json)  ~
+      =/  id  (~(get by p.json) 'id')
+      ?~  id  ~
+      ?.  ?=([%s *] u.id)  ~
+      `p.u.id
+    ::
+    ::  Build an Iris GET request card aimed at the backend's /v1/models endpoint.
+    ++  refresh-models-card
+      |=  chat-url=@t
+      ^-  card
+      =/  =request:http
+        :*  method=%'GET'
+            url=(derive-models-url chat-url)
+            header-list=~
+            body=~
+        ==
+      [%pass /refresh-models %arvo %i %request request *outbound-config:iris]
+    ::
     ::  Extract choices[0].message.content from a non-streaming OpenAI response.
     ++  extract-content
       |=  body=@t
@@ -83,7 +129,9 @@
 ::
 ++  on-init
   ^-  (quip card _this)
-  `this(state [%0 'http://localhost:11434/v1/chat/completions' [%whitelist ~] ~['llama3.1:8b'] ~])
+  =/  default-backend=@t  'http://localhost:11434/v1/chat/completions'
+  :_  this(state [%0 default-backend [%whitelist ~] ~ ~])
+  [(refresh-models-card default-backend)]~
 ::
 ++  on-save  !>(state)
 ::
@@ -104,16 +152,19 @@
     =/  cmd
       !<  $%  [%set-backend url=@t]
               [%set-policy =access-policy:llmproxy]
-              [%set-models models=(list @t)]
+              [%refresh-models ~]
           ==
       vase
     ?-    -.cmd
-        %set-backend  `this(backend-url url.cmd)
-        %set-policy   `this(policy access-policy.cmd)
+        %set-backend
+      :_  this(backend-url url.cmd)
+      [(refresh-models-card url.cmd)]~
     ::
-        %set-models
-      :_  this(advertised models.cmd)
-      [%give %fact ~[/models] %llmproxy-models !>(models.cmd)]~
+        %set-policy  `this(policy access-policy.cmd)
+    ::
+        %refresh-models
+      :_  this
+      [(refresh-models-card backend-url)]~
     ==
   ::
       %llmproxy-job
@@ -150,6 +201,20 @@
   |=  [=wire =sign-arvo]
   ^-  (quip card _this)
   ?+  wire  (on-arvo:def wire sign-arvo)
+      [%refresh-models ~]
+    ?+  +<.sign-arvo  (on-arvo:def wire sign-arvo)
+        %http-response
+      =/  resp=client-response:iris  +>.sign-arvo
+      ?.  ?=(%finished -.resp)  `this
+      =/  rep  (to-httr:iris [response-header.resp full-file.resp])
+      =/  body-text=@t
+        ?~  r.rep  ''
+        q.u.r.rep
+      =/  ms=(list @t)  (parse-models-list body-text)
+      :_  this(advertised ms)
+      [%give %fact ~[/models] %llmproxy-models !>(ms)]~
+    ==
+  ::
       [%req @ ~]
     =/  n=@ud  (slav %ud i.t.wire)
     ?+  +<.sign-arvo  (on-arvo:def wire sign-arvo)
