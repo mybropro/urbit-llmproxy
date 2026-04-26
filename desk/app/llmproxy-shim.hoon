@@ -337,10 +337,6 @@
             ;dd:"{our-text}"
             ;dt: ollama backend
             ;dd:"{backend-text}"
-            ;dt: policy mode
-            ;dd:"{policy-mode}"
-            ;dt: policy ships
-            ;dd:"{policy-ships}"
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-backend");
@@ -355,6 +351,16 @@
             ;br;
             ;input(type "text", name "models", value "{models-text}", placeholder "llama3.1:8b, mistral:7b", size "60");
             ;button(type "submit"): update advertised models
+          ==
+          ;h3: Access permissions
+          ;p
+            ;small: Decide which ships are allowed to submit jobs to your node. Your own ship is always allowed.
+          ==
+          ;dl
+            ;dt: mode
+            ;dd:"{policy-mode}"
+            ;dt: ships
+            ;dd:"{policy-ships}"
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "toggle-policy-mode");
