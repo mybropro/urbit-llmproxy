@@ -135,12 +135,19 @@ A publisher runs the GPU; a friend installs the desk and configures their shim's
 
 Source `.dot` files for both diagrams live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
+## Access policy
+
+The node enforces who can submit jobs. Two modes:
+
+- **whitelist** (default) — deny by default; only ships in the list are allowed. Empty list = nobody but your own ship.
+- **blacklist** — allow by default; ships in the list are denied. Empty list = everyone.
+
+Your own ship is always allowed regardless of mode. Manage via `/llmproxy/ui` — toggle modes and edit the ship list there. Denied requests get a clean `HTTP 403` with a reason instead of timing out.
+
 ## Known limitations
 
 - **Streaming is a UX illusion.** Iris (Urbit's HTTP client) buffers the inference server's response fully before delivering it to the agent. From the curl client's perspective: silence, then all chunks at once. Real progressive streaming would require either runtime changes or bypassing Iris with a `%lick`-based unix bridge.
-- **No access policy.** Whoever can reach your shim's HTTP port can drive your node. Fine on `localhost`; do not expose your ship to the public internet without lock-down work first.
 - **One node per shim.** No load balancing, no fallback. The shim's `node` config is a single `@p`.
-- **Hard-coded backend URL.** The node assumes `http://localhost:11434/v1/chat/completions`. To change, the source needs editing — `:llmproxy-node` doesn't expose a `%set-backend` poke yet.
 
 See [`SPEC.md`](./SPEC.md) for the v1+ roadmap (real desk separation, access policies, multi-node routing, true streaming approaches).
 

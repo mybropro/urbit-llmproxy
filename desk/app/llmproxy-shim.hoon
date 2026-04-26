@@ -23,6 +23,7 @@
       node=@p
       models=(list @t)
       backend=@t
+      policy=access-policy:llmproxy
       pending=(map @ud pending-shim)
   ==
 --
@@ -189,14 +190,67 @@
       ?~  t.ms  i.ms
       (rap 3 ~[i.ms ', ' $(ms t.ms)])
     ::
+    ::  Build the cards to apply a new policy: poke node, render UI.
+    ++  policy-cards
+      |=  $:  our=@p
+              eid=@ta
+              new-pol=access-policy:llmproxy
+              node=@p
+              models=(list @t)
+              backend=@t
+          ==
+      ^-  (list card)
+      =/  poke-card=card
+        [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
+      =/  http-cards
+        %+  give-simple-payload:app:server  eid
+        (manx-response (ui-page our node models backend new-pol 'policy updated'))
+      [poke-card http-cards]
+    ::
+    ::  Mode label: "whitelist" or "blacklist".
+    ++  policy-mode-text
+      |=  =access-policy:llmproxy
+      ^-  @t
+      ?-  -.access-policy
+          %whitelist  'whitelist (only listed ships allowed)'
+          %blacklist  'blacklist (everyone except listed)'
+      ==
+    ::
+    ::  Comma-separated list of ships in the policy.
+    ++  policy-ships-csv
+      |=  =access-policy:llmproxy
+      ^-  @t
+      (ships-to-csv ~(tap in ships.access-policy))
+    ::
+    ++  ships-to-csv
+      |=  ships=(list @p)
+      ^-  @t
+      ?~  ships  ''
+      ?~  t.ships  (scot %p i.ships)
+      (rap 3 ~[(scot %p i.ships) ', ' $(ships t.ships)])
+    ::
     ::  Build the config UI page.
     ++  ui-page
-      |=  [our=@p node=@p models=(list @t) backend=@t msg=@t]
+      |=  $:  our=@p
+              node=@p
+              models=(list @t)
+              backend=@t
+              =access-policy:llmproxy
+              msg=@t
+          ==
       ^-  manx
       =/  ship-text=tape  (scow %p node)
       =/  our-text=tape  (scow %p our)
       =/  models-text=tape  (trip (list-to-csv models))
       =/  backend-text=tape  (trip backend)
+      =/  policy-mode=tape  (trip (policy-mode-text access-policy))
+      =/  policy-ships=tape  (trip (policy-ships-csv access-policy))
+      =/  toggle-target=@t
+        ?-  -.access-policy
+            %whitelist  'blacklist'
+            %blacklist  'whitelist'
+        ==
+      =/  toggle-label=tape  (trip (cat 3 'switch to ' toggle-target))
       =/  msg-text=tape  (trip msg)
       =/  css=tape
         """
@@ -259,6 +313,10 @@
             ;dd:"{our-text}"
             ;dt: ollama backend
             ;dd:"{backend-text}"
+            ;dt: policy mode
+            ;dd:"{policy-mode}"
+            ;dt: policy ships
+            ;dd:"{policy-ships}"
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-backend");
@@ -266,6 +324,17 @@
             ;br;
             ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
             ;button(type "submit"): update backend
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "toggle-policy-mode");
+            ;button(type "submit"):"{toggle-label}"
+          ==
+          ;form(method "post", action "/llmproxy/ui")
+            ;input(type "hidden", name "action", value "set-policy-ships");
+            ;label: ships (comma-separated @ps; replaces the whole list)
+            ;br;
+            ;input(type "text", name "ships", value "{policy-ships}", placeholder "~zod, ~nec", size "60");
+            ;button(type "submit"): update ships
           ==
           ;p: To invite a friend:
           ;ol
@@ -295,7 +364,17 @@
 ::
 ++  on-init
   ^-  (quip card _this)
-  :_  this(state [%0 0 our.bowl ~['llama3.1:8b'] 'http://localhost:11434/v1/chat/completions' ~])
+  :_  %=  this
+          state
+        :*  %0
+            nonce=0
+            node=our.bowl
+            models=~['llama3.1:8b']
+            backend='http://localhost:11434/v1/chat/completions'
+            policy=`access-policy:llmproxy`[%whitelist ~]
+            pending=~
+        ==
+      ==
   [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]~
 ::
 ++  on-save  !>(state)
@@ -330,7 +409,7 @@
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state ''))
+      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state ''))
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
             ?=([%llmproxy %ui ~] site.rl)
@@ -345,15 +424,15 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state 'missing node value'))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing node value'))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state (cat 3 'invalid @p: ' u.raw)))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state (cat 3 'invalid @p: ' u.raw)))
         :_  this(node u.parsed)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl u.parsed models.state backend.state 'node updated'))
+        (manx-response (ui-page our.bowl u.parsed models.state backend.state policy.state 'node updated'))
       ?:  ?&  ?=(^ act)  =('set-models' u.act)  ==
         =/  raw  (~(get by fields) 'models')
         =/  ms=(list @t)
@@ -361,23 +440,46 @@
           (csv-to-list u.raw)
         :_  this(models ms)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl node.state ms backend.state 'models updated'))
+        (manx-response (ui-page our.bowl node.state ms backend.state policy.state 'models updated'))
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
         =/  raw  (~(get by fields) 'backend')
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state backend.state 'missing backend url'))
+          (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'missing backend url'))
         =/  poke-card=card
           [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl node.state models.state u.raw 'backend updated'))
+          (manx-response (ui-page our.bowl node.state models.state u.raw policy.state 'backend updated'))
         :_  this(backend u.raw)
         [poke-card http-cards]
+      ?:  ?&  ?=(^ act)  =('toggle-policy-mode' u.act)  ==
+        =/  np=access-policy:llmproxy
+          ?-  -.policy.state
+              %whitelist  [%blacklist ships.policy.state]
+              %blacklist  [%whitelist ships.policy.state]
+          ==
+        :_  this(policy np)
+        (policy-cards our.bowl eyre-id np node.state models.state backend.state)
+      ?:  ?&  ?=(^ act)  =('set-policy-ships' u.act)  ==
+        =/  raw  (~(get by fields) 'ships')
+        =/  ship-strs=(list @t)
+          ?~  raw  ~
+          (csv-to-list u.raw)
+        =/  ships=(set @p)
+          %-  silt
+          (murn ship-strs |=(s=@t (slaw %p s)))
+        =/  np=access-policy:llmproxy
+          ?-  -.policy.state
+              %whitelist  [%whitelist ships]
+              %blacklist  [%blacklist ships]
+          ==
+        :_  this(policy np)
+        (policy-cards our.bowl eyre-id np node.state models.state backend.state)
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl node.state models.state backend.state 'unknown action'))
+      (manx-response (ui-page our.bowl node.state models.state backend.state policy.state 'unknown action'))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
@@ -426,8 +528,13 @@
     ?+  -.sign  (on-agent:def wire sign)
         %poke-ack
       ?~  p.sign  `this
-      ~&  >>>  [%shim-poke-failed u.p.sign]
-      `this
+      =/  n=@ud  (slav %ud i.t.wire)
+      =/  rec  (~(get by pending.state) n)
+      ?~  rec  `this
+      :_  this(pending (~(del by pending.state) n))
+      %+  weld
+        ~[[%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %leave ~]]
+      (give-simple-payload:app:server eyre-id.u.rec [[403 ~] `(as-octs:mimes:html '{"error":"poke rejected by node (likely access policy)"}')])
     ==
   ::
       [%watch @ ~]

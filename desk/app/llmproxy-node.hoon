@@ -17,6 +17,7 @@
 +$  state-0
   $:  %0
       backend-url=@t
+      policy=access-policy:llmproxy
       pending=(map @ud pending-job)
   ==
 --
@@ -41,6 +42,17 @@
             ==
         ==
       (en:json:html jon)
+    ::
+    ::  Check whether a ship is allowed to submit a job under this policy.
+    ::  The node's own ship is always allowed, regardless of mode.
+    ++  allowed
+      |=  [src=@p our=@p =access-policy:llmproxy]
+      ^-  ?
+      ?:  =(src our)  &
+      ?-    -.access-policy
+          %whitelist  (~(has in ships.access-policy) src)
+          %blacklist  !(~(has in ships.access-policy) src)
+      ==
     ::
     ::  Extract choices[0].message.content from a non-streaming OpenAI response.
     ++  extract-content
@@ -70,7 +82,7 @@
 ::
 ++  on-init
   ^-  (quip card _this)
-  `this(state [%0 'http://localhost:11434/v1/chat/completions' ~])
+  `this(state [%0 'http://localhost:11434/v1/chat/completions' [%whitelist ~] ~])
 ::
 ++  on-save  !>(state)
 ::
@@ -88,10 +100,20 @@
   ^-  (quip card _this)
   ?+  mark  (on-poke:def mark vase)
       %noun
-    =/  cmd  !<([%set-backend url=@t] vase)
-    `this(backend-url url.cmd)
+    =/  cmd
+      !<  $%  [%set-backend url=@t]
+              [%set-policy =access-policy:llmproxy]
+          ==
+      vase
+    ?-    -.cmd
+        %set-backend  `this(backend-url url.cmd)
+        %set-policy   `this(policy access-policy.cmd)
+    ==
   ::
       %llmproxy-job
+    ?.  (allowed src.bowl our.bowl policy)
+      ~|  "llmproxy-node: access denied for {<src.bowl>} under policy {<-.policy>}"
+      !!
     =/  jr  !<(job-req:llmproxy vase)
     =/  body=@t  (build-body model.jr prompt.jr)
     =/  =request:http
