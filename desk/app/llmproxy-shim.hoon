@@ -26,6 +26,7 @@
       node=@p
       models=(list @t)
       backend=@t
+      backend-key=@t
       policy=access-policy:llmproxy
       hosting=?
       pending=(map @ud pending-shim)
@@ -235,6 +236,7 @@
               node=@p
               models=(list @t)
               backend=@t
+              backend-key-set=?
               hosting=?
           ==
       ^-  (list card)
@@ -242,7 +244,7 @@
         [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
       =/  http-cards
         %+  give-simple-payload:app:server  eid
-        (manx-response (ui-page our publisher api-base node models backend new-pol hosting 'policy updated' '' ''))
+        (manx-response (ui-page our publisher api-base node models backend backend-key-set new-pol hosting 'policy updated' '' ''))
       [poke-card http-cards]
     ::
     ::  Mode label: "whitelist" or "blacklist".
@@ -275,6 +277,7 @@
               node=@p
               models=(list @t)
               backend=@t
+              backend-key-set=?
               =access-policy:llmproxy
               hosting=?
               msg=@t
@@ -391,6 +394,8 @@
                   ;dd:"{our-text}"
                   ;dt: ollama backend
                   ;dd:"{backend-text}"
+                  ;dt: api key
+                  ;dd:"{?:(backend-key-set "(set)" "(none)")}"
                 ==
                 ;form(method "post", action "/llmproxy/ui")
                   ;input(type "hidden", name "action", value "set-backend");
@@ -398,6 +403,13 @@
                   ;br;
                   ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
                   ;button(type "submit"): update backend
+                ==
+                ;form(method "post", action "/llmproxy/ui")
+                  ;input(type "hidden", name "action", value "set-backend-key");
+                  ;label: api key (Bearer token; leave empty to remove)
+                  ;br;
+                  ;input(type "password", name "key", placeholder "sk-...", size "60");
+                  ;button(type "submit"): update api key
                 ==
                 ;form(method "post", action "/llmproxy/ui")
                   ;input(type "hidden", name "action", value "refresh-models");
@@ -467,6 +479,7 @@
             node=our.bowl
             models=~
             backend='http://localhost:11434/v1/chat/completions'
+            backend-key=''
             policy=`access-policy:llmproxy`[%whitelist ~]
             hosting=%.n
             pending=~
@@ -524,7 +537,7 @@
         ?~(scried models.state u.scried)
       :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state fresh-models backend.state policy.state hosting.state '' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state fresh-models backend.state !=('' backend-key.state) policy.state hosting.state '' '' ''))
     ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
@@ -540,12 +553,12 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'missing node value' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state 'missing node value' '' ''))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state (cat 3 'invalid @p: ' u.raw) '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state (cat 3 'invalid @p: ' u.raw) '' ''))
         =/  resub-cards=(list card)
           :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
               [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
@@ -565,13 +578,23 @@
         :_  this(node u.parsed, models fresh-models)
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state policy.state hosting.state 'node updated' '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state !=('' backend-key.state) policy.state hosting.state 'node updated' '' ''))
+      ?:  ?&  ?=(^ act)  =('set-backend-key' u.act)  ==
+        =/  raw  (~(get by fields) 'key')
+        =/  key=@t  ?~(raw '' u.raw)
+        =/  poke-card=card
+          [%pass /set-backend-key %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend-key key])]
+        =/  http-cards
+          %+  give-simple-payload:app:server  eyre-id
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' key) policy.state hosting.state ?:(=('' key) 'api key removed' 'api key updated') '' ''))
+        :_  this(backend-key key)
+        [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
           [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'refreshing models from backend...' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
@@ -579,12 +602,12 @@
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'missing backend url' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state 'missing backend url' '' ''))
         =/  poke-card=card
           [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state u.raw policy.state hosting.state 'backend updated' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state u.raw !=('' backend-key.state) policy.state hosting.state 'backend updated' '' ''))
         :_  this(backend u.raw)
         [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('toggle-hosting' u.act)  ==
@@ -599,6 +622,7 @@
           node.state
           models.state
           backend.state
+          !=('' backend-key.state)
           policy.state
           new-hosting
           ?:(new-hosting 'hosting on' 'hosting off')
@@ -612,7 +636,7 @@
               %blacklist  [%whitelist ships.policy.state]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state hosting.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) hosting.state)
       ?:  ?&  ?=(^ act)  =('set-policy-ships' u.act)  ==
         =/  raw  (~(get by fields) 'ships')
         =/  ship-strs=(list @t)
@@ -627,14 +651,14 @@
               %blacklist  [%blacklist ships]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state hosting.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) hosting.state)
       ?:  ?&  ?=(^ act)  =('test' u.act)  ==
         =/  prompt-raw  (~(get by fields) 'prompt')
         =/  model-raw  (~(get by fields) 'model')
         ?:  |(?=(~ prompt-raw) =('' u.prompt-raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'enter a prompt to test' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state 'enter a prompt to test' '' ''))
         =/  model=@t
           ?~  model-raw
             ?~  models.state  'llama3.1:8b'
@@ -653,7 +677,7 @@
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state policy.state hosting.state 'unknown action' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) policy.state hosting.state 'unknown action' '' ''))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
@@ -780,6 +804,7 @@
               node.state
               models.state
               backend.state
+              !=('' backend-key.state)
               policy.state
               hosting.state
               'test response below'

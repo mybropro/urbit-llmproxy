@@ -17,6 +17,7 @@
 +$  state-0
   $:  %0
       backend-url=@t
+      backend-key=@t
       policy=access-policy:llmproxy
       advertised=(list @t)
       pending=(map @ud pending-job)
@@ -89,14 +90,24 @@
       ?.  ?=([%s *] u.id)  ~
       `p.u.id
     ::
+    ::  Build header-list with optional Authorization Bearer.
+    ++  build-headers
+      |=  [content-type=(unit @t) api-key=@t]
+      ^-  header-list:http
+      =/  base=header-list:http
+        ?~  content-type  ~
+        ~[['content-type'^u.content-type]]
+      ?:  =('' api-key)  base
+      [['authorization'^(rap 3 ~['Bearer ' api-key])] base]
+    ::
     ::  Build an Iris GET request card aimed at the backend's /v1/models endpoint.
     ++  refresh-models-card
-      |=  chat-url=@t
+      |=  [chat-url=@t api-key=@t]
       ^-  card
       =/  =request:http
         :*  method=%'GET'
             url=(derive-models-url chat-url)
-            header-list=~
+            header-list=(build-headers ~ api-key)
             body=~
         ==
       [%pass /refresh-models %arvo %i %request request *outbound-config:iris]
@@ -130,8 +141,8 @@
 ++  on-init
   ^-  (quip card _this)
   =/  default-backend=@t  'http://localhost:11434/v1/chat/completions'
-  :_  this(state [%0 default-backend [%whitelist ~] ~ ~])
-  [(refresh-models-card default-backend)]~
+  :_  this(state [%0 default-backend '' [%whitelist ~] ~ ~])
+  [(refresh-models-card default-backend '')]~
 ::
 ++  on-save  !>(state)
 ::
@@ -151,6 +162,7 @@
       %noun
     =/  cmd
       !<  $%  [%set-backend url=@t]
+              [%set-backend-key key=@t]
               [%set-policy =access-policy:llmproxy]
               [%refresh-models ~]
           ==
@@ -158,13 +170,17 @@
     ?-    -.cmd
         %set-backend
       :_  this(backend-url url.cmd)
-      [(refresh-models-card url.cmd)]~
+      [(refresh-models-card url.cmd backend-key)]~
+    ::
+        %set-backend-key
+      :_  this(backend-key key.cmd)
+      [(refresh-models-card backend-url key.cmd)]~
     ::
         %set-policy  `this(policy access-policy.cmd)
     ::
         %refresh-models
       :_  this
-      [(refresh-models-card backend-url)]~
+      [(refresh-models-card backend-url backend-key)]~
     ==
   ::
       %llmproxy-job
@@ -176,7 +192,7 @@
     =/  =request:http
       :*  method=%'POST'
           url=backend-url
-          header-list=~[['content-type'^'application/json']]
+          header-list=(build-headers `'application/json' backend-key)
           body=`(as-octs:mimes:html body)
       ==
     =/  n=@ud  nonce.id.jr
@@ -242,9 +258,10 @@
   |=  =path
   ^-  (unit (unit cage))
   ?+  path  (on-peek:def path)
-      [%x %advertised ~]  ``noun+!>(advertised)
-      [%x %policy ~]      ``noun+!>(policy)
-      [%x %backend ~]     ``noun+!>(backend-url)
+      [%x %advertised ~]    ``noun+!>(advertised)
+      [%x %policy ~]        ``noun+!>(policy)
+      [%x %backend ~]       ``noun+!>(backend-url)
+      [%x %backend-key ~]   ``noun+!>(backend-key)
   ==
 ++  on-agent  on-agent:def
 ++  on-fail   on-fail:def
