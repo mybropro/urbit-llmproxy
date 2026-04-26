@@ -154,3 +154,23 @@ See [`SPEC.md`](./SPEC.md) for the v1+ roadmap (real desk separation, access pol
 ## Updating
 
 After install, your ship subscribes to the publisher's desk. When the publisher commits a new revision, your ship pulls it automatically and `gall: bumped` your three agents. No reinstall needed.
+
+## Testing
+
+Two layers:
+
+**Hoon unit tests** (pure helpers — auth, parsers, builders):
+
+```
+-test /=llmproxy=/tests/lib/llmproxy-helpers ~
+```
+
+26 tests covering `allowed`, `bearer-ok`, `get-header`, the JSON / form / CSV parsers, model URL derivation, etc.
+
+**Bash end-to-end tests** (HTTP behavior — needs both ships running, hosting on, and Ollama):
+
+```
+bash tests/e2e.sh
+```
+
+17 scenarios: whitelist/blacklist enforcement (local + cross-ship), API-token gate (set/wrong/right/none), generate-token randomness, models discovery, UI invariants. Override the URLs via `T1=` / `T2=` env vars.
