@@ -483,10 +483,22 @@
           :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
               [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
           ==
-        :_  this(node u.parsed, models ~)
+        ::  For local node, scry the node's current advertised list synchronously
+        ::  so the response page renders with fresh models. For remote nodes the
+        ::  cache holds whatever was last known until the new subscription fires.
+        =/  fresh-models=(list @t)
+          ?.  =(u.parsed our.bowl)  models.state
+          =/  scried=(unit (list @t))
+            %-  mole
+            |.
+            .^  (list @t)  %gx
+                /(scot %p our.bowl)/llmproxy-node/(scot %da now.bowl)/advertised/noun
+            ==
+          ?~(scried models.state u.scried)
+        :_  this(node u.parsed, models fresh-models)
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl u.parsed ~ backend.state policy.state 'node updated; fetching models' '' ''))
+        (manx-response (ui-page our.bowl u.parsed fresh-models backend.state policy.state 'node updated' '' ''))
       ?:  ?&  ?=(^ act)  =('set-advertised-models' u.act)  ==
         =/  raw  (~(get by fields) 'models')
         =/  ms=(list @t)
