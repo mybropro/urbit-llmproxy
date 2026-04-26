@@ -407,15 +407,12 @@
             ;button(type "submit"): update node
           ==
           ;form(method "post", action "/llmproxy/ui")
-            ;input(type "hidden", name "action", value "set-client-api-token");
             ;label: api token (clients send as Authorization: Bearer ...; leave empty to disable auth)
             ;br;
             ;input(type "password", name "token", placeholder "your-shared-secret", size "60");
-            ;button(type "submit"): update api token
-          ==
-          ;form(method "post", action "/llmproxy/ui", style "display:inline-block;margin-right:.5em")
-            ;input(type "hidden", name "action", value "generate-api-token");
-            ;button(type "submit"): generate a random token
+            ;br;
+            ;button(type "submit", name "action", value "set-client-api-token"): update
+            ;button(type "submit", name "action", value "generate-api-token"): generate random
           ==
           ;p
             ;small: Models auto-populate from the node when you change it. To change what's offered, ask the node operator.
