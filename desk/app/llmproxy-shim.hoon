@@ -324,6 +324,29 @@
       =/  toggle-label=tape  (trip (cat 3 'switch to ' toggle-target))
       =/  test-prompt-tape=tape  (trip test-prompt)
       =/  test-response-tape=tape  (trip test-response)
+      =/  example-model-cord=@t
+        ?~(models 'llama3.1:8b' i.models)
+      =/  example-json-cord=@t
+        %+  rap  3
+        :~  '{"model":"'
+            example-model-cord
+            '","messages":[{"role":"user","content":"hello"}]}'
+        ==
+      =/  auth-line-cord=@t
+        ?:  client-api-token-set
+          ' \\\0a  -H "Authorization: Bearer YOUR_TOKEN"'
+        ''
+      =/  curl-example=tape
+        %-  trip
+        %+  rap  3
+        :~  'curl -X POST '
+            api-base
+            '/v1/chat/completions \\\0a  -H "content-type: application/json"'
+            auth-line-cord
+            ' \\\0a  -d \''
+            example-json-cord
+            '\''
+        ==
       =/  msg-text=tape  (trip msg)
       =/  css=tape
         """
@@ -372,6 +395,10 @@
             ;dt: api token
             ;dd:"{?:(client-api-token-set "(set — clients must send Authorization: Bearer <token>)" "(none — endpoint is open to anyone with the URL)")}"
           ==
+          ;p
+            ;small: Example
+          ==
+          ;pre:"{curl-example}"
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-node");
             ;label: route requests to this ship's %llmproxy-node
@@ -518,9 +545,7 @@
             pending=~
         ==
       ==
-  :~  [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]
-      [%pass /models %agent [our.bowl %llmproxy-node] %watch /models]
-  ==
+  [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]~
 ::
 ++  on-save  !>(state)
 ::
@@ -531,13 +556,7 @@
   ?~  loaded
     ~&  >>  %llmproxy-shim-reset-state
     on-init
-  ::  Re-emit /models watch so we get the current list. (Cheap: leaving
-  ::  a non-existent sub is a no-op; this handles the install-time race
-  ::  where shim started watching before the node was up.)
-  :_  this(state u.loaded)
-  :~  [%pass /models %agent [node.u.loaded %llmproxy-node] %leave ~]
-      [%pass /models %agent [node.u.loaded %llmproxy-node] %watch /models]
-  ==
+  `this(state u.loaded)
 ::
 ++  on-poke
   |=  [=mark =vase]
