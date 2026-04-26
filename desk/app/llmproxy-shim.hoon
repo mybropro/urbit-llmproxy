@@ -413,6 +413,10 @@
             ;input(type "password", name "token", placeholder "your-shared-secret", size "60");
             ;button(type "submit"): update api token
           ==
+          ;form(method "post", action "/llmproxy/ui", style "display:inline-block;margin-right:.5em")
+            ;input(type "hidden", name "action", value "generate-api-token");
+            ;button(type "submit"): generate a random token
+          ==
           ;p
             ;small: Models auto-populate from the node when you change it. To change what's offered, ask the node operator.
           ==
@@ -631,6 +635,14 @@
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
         (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'node updated' '' ''))
+      ?:  ?&  ?=(^ act)  =('generate-api-token' u.act)  ==
+        ::  Eyre intercepts Authorization: Bearer 0v... as a session lookup,
+        ::  so prefix with 'sk-' (and drop the 0v) to keep it out of that path.
+        =/  new-token=@t
+          (cat 3 'sk-' (rsh [3 2] (scot %uv (sham eny.bowl))))
+        :_  this(client-api-token new-token)
+        %+  give-simple-payload:app:server  eyre-id
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) %.y policy.state hosting.state (cat 3 'new api token (copy now, you cannot see it again): ' new-token) '' ''))
       ?:  ?&  ?=(^ act)  =('set-client-api-token' u.act)  ==
         =/  raw  (~(get by fields) 'token')
         =/  tok=@t  ?~(raw '' u.raw)
