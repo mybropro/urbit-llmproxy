@@ -1,20 +1,32 @@
 # %llmproxy
 
+**Share a local LLM with friends over Urbit, without exposing your machine to the public internet.**
+
+If you've got Ollama or vLLM running on a GPU box at home and want to let a friend hit it from their laptop, the usual options are:
+
+- **Tailscale + raw port** — works, but now your friend is on your private network and you're trusting whatever software runs on their device.
+- **Cloudflare Tunnel + Bearer auth** — works, but you're maintaining a tunnel, a public hostname, an auth proxy, and rotating tokens.
+- **Reverse proxy + nginx + Let's Encrypt** — works, but you're running a small webhost.
+
+%llmproxy gets you the same outcome with less infrastructure. Both you and your friend each run an Urbit ship. Your friend installs the desk, points their shim at your `@p`, and curls `http://localhost:<port>/llmproxy/v1/chat/completions` from their laptop. Routing, NAT traversal, identity-based auth, and access control all come from Ames. No tunnels, no DNS, no certs, no public ports.
+
+It's an OpenAI-compatible HTTP proxy on the front, an Urbit ship in the middle, your inference server on the back end.
+
 ![Network topology](docs/multi-friend.svg)
 
-An Urbit desk that turns any ship into an OpenAI-compatible LLM proxy. A node operator with a GPU exposes a local inference server (Ollama, vLLM, llama.cpp, anything that speaks OpenAI's `/v1/chat/completions`) to friends over Ames. Friends install the desk on their own ship, point any OpenAI tool at `http://localhost:<port>/llmproxy`, and their requests transparently traverse Urbit to the node's hardware.
+## Status
 
-Status: v0.4 — works end-to-end between two ships. See *Known limitations* below for what's honest about it. Full design spec in [`SPEC.md`](./SPEC.md).
+v0.4 — works end-to-end between two ships. See *Known limitations* below for the honest version. Full design spec in [`SPEC.md`](./SPEC.md).
 
 ## You'll need
 
 - An Urbit ship. A free comet works fine — see [hawk.computer/install](https://hawk.computer/~~/install/).
-- The `urbit` binary running. The ship's HTTP port (typically `:80` or whatever Eyre bound — check `<pier>/.http.ports`).
-- *(Node operator only)* a local OpenAI-compatible inference server. Ollama at `localhost:11434` is the default assumption; other servers work as long as they expose `/v1/chat/completions`.
+- The `urbit` binary running. Check `<pier>/.http.ports` for the port Eyre bound (typically `:80`).
+- *(Hosting only)* a local OpenAI-compatible inference server. Ollama at `localhost:11434` is the default; vLLM, llama.cpp's server, OpenRouter, OpenAI direct, etc. all work as long as they expose `/v1/chat/completions`.
 
-## Install (as the publisher)
+## Install from this repo
 
-You're the one with the GPU. From your ship's dojo:
+You're going to publish the desk from your own ship so friends can install it from you. From your ship's dojo:
 
 ```
 |merge %llmproxy our %base
@@ -27,8 +39,6 @@ That mounts a forked-from-base desk at `<pier>/llmproxy/`. Now copy this repo's 
 # from this repo's root, on the same machine as your pier
 cp -R desk/* <pier>/llmproxy/
 ```
-
-`desk.bill` overwrites base's bill so only our 3 agents auto-start. The `sur/`, `mar/`, `app/` files add new content alongside base's.
 
 Back in the dojo:
 
@@ -46,44 +56,33 @@ gall: booted %llmproxy-client
 gall: booted %llmproxy-shim
 ```
 
-The shim binds at `http://<your-ship-host>/llmproxy`. By default it points at `our.bowl` (your own ship's node). To use a different ship's node:
+The shim binds at `http://<your-ship-host>/llmproxy`. Open `/llmproxy/ui` in a browser to configure node target, models, and access policy via HTML forms.
+
+### Inviting a friend
+
+Send them your `@p`. On their ship:
 
 ```
-:llmproxy-shim &noun [%set-node ~some-other-ship]
+|install ~your-ship %llmproxy
 ```
 
-To advertise the actual models your Ollama has:
+When they see the three `gall: booted` lines, the desk is installed. They open `/llmproxy/ui` on their ship and:
 
-```
-:llmproxy-shim &noun [%set-models ~['llama3.1:8b' 'mistral:7b']]
-```
+1. Set **node** to your `@p`
+2. (If you set an api token) paste it as the apiKey in their tool of choice
 
-## Install (as a friend)
-
-You want to use someone else's GPU. Get their `@p` and:
-
-```
-|install ~publisher-ship %llmproxy
-```
-
-This pulls the desk over Ames. ~30-60 seconds (the desk is base + our additions, ~15 MB). When you see all three agents `booted`, configure your shim to send jobs to the publisher's node:
-
-```
-:llmproxy-shim &noun [%set-node ~publisher-ship]
-:llmproxy-shim &noun [%set-models ~['llama3.1:8b']]
-```
-
-That's it. Your ship is now an OpenAI endpoint at `http://localhost:<your-http-port>/llmproxy` whose requests proxy to the publisher.
+Their ship now exposes `http://localhost:<port>/llmproxy/v1/chat/completions` — fully proxied to your hardware over Ames.
 
 ## Usage
 
-Any OpenAI-compatible tool works against `http://<ship-host>:<port>/llmproxy`. The `apiKey` field is unused — pass any non-empty string.
+Any OpenAI-compatible tool works against `http://<ship-host>:<port>/llmproxy`. Pass the api token (if you set one) as `apiKey`.
 
 ### curl
 
 ```bash
 curl -N -X POST http://localhost:80/llmproxy/v1/chat/completions \
   -H 'content-type: application/json' \
+  -H 'Authorization: Bearer sk-your-token-or-anything' \
   -d '{
     "model":"llama3.1:8b",
     "messages":[{"role":"user","content":"hello"}],
@@ -100,7 +99,7 @@ curl -N -X POST http://localhost:80/llmproxy/v1/chat/completions \
     "provider": "openai",
     "model": "llama3.1:8b",
     "apiBase": "http://localhost:80/llmproxy",
-    "apiKey": "urbit"
+    "apiKey": "sk-your-token"
   }]
 }
 ```
@@ -108,8 +107,8 @@ curl -N -X POST http://localhost:80/llmproxy/v1/chat/completions \
 ### Endpoints
 
 - `POST /llmproxy/v1/chat/completions` — chat. Honors `stream` field. Returns SSE if `true`, single JSON otherwise.
-- `GET /llmproxy/v1/models` — list configured models.
-- `GET /llmproxy/ui` — config page. View and update node target / model list with HTML forms instead of dojo pokes. Server-rendered with [Sail](https://docs.urbit.org/hoon/sail), no JS framework, no glob.
+- `GET /llmproxy/v1/models` — list advertised models.
+- `GET /llmproxy/ui` — config page. View and update node target / api token / access policy / etc. with HTML forms. Server-rendered with [Sail](https://docs.urbit.org/hoon/sail), no JS framework, no glob.
 
 ## Architecture
 
@@ -117,13 +116,15 @@ Three Gall agents in one desk:
 
 | Agent | Role |
 |---|---|
-| `%llmproxy-node` | Accepts job pokes, hits local OpenAI HTTP, emits result as a fact. *Run this where your inference server lives.* |
-| `%llmproxy-shim` | Eyre HTTP handler. Bridges OpenAI HTTP ↔ Gall pokes. *Run this where you want to use the API.* |
+| `%llmproxy-node` | Accepts job pokes, calls the local OpenAI HTTP backend, emits the result as a fact. *Run this where your inference server lives.* |
+| `%llmproxy-shim` | Eyre HTTP handler. Bridges OpenAI HTTP ↔ Gall pokes. Also serves the `/llmproxy/ui` config page. *Run this where you want to use the API.* |
 | `%llmproxy-client` | Dojo-driven utility for ad-hoc tests (`:llmproxy-client &noun [%ask ~target-ship 'model' 'prompt']`). Not in the HTTP path. |
 
-A normal install runs all three on the same ship. Shim's `node` config picks which friend's ship to route requests to. Each ship can run multiple OpenAI-compatible apps against its own shim, all sharing the same upstream node — see the topology diagram at the top of this README.
+A normal install runs all three on the same ship. The shim's `node` config picks which friend's ship handles inference. Each ship can run multiple OpenAI-compatible apps against its own shim, all sharing the same upstream node — see the topology diagram above.
 
-Source `.dot` files live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
+Pure functions (auth checks, parsers, JSON builders, header lookup, ...) live in `lib/llmproxy-helpers.hoon` and are unit-tested in isolation.
+
+Source `.dot` files for the diagram live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
 ## Access policy
 
@@ -132,18 +133,21 @@ The node enforces who can submit jobs. Two modes:
 - **whitelist** (default) — deny by default; only ships in the list are allowed. Empty list = nobody but your own ship.
 - **blacklist** — allow by default; ships in the list are denied. Empty list = everyone.
 
-Your own ship is always allowed regardless of mode. Manage via `/llmproxy/ui` — toggle modes and edit the ship list there. Denied requests get a clean `HTTP 403` with a reason instead of timing out.
+Your own ship is always allowed regardless of mode. Manage via `/llmproxy/ui`. Denied requests return `HTTP 403` instead of timing out.
+
+The shim also gates the HTTP layer with an optional Bearer token. Generate one in the UI; paste it into your friend's `apiKey` field. Empty = no auth required.
 
 ## Known limitations
 
 - **Streaming is a UX illusion.** Iris (Urbit's HTTP client) buffers the inference server's response fully before delivering it to the agent. From the curl client's perspective: silence, then all chunks at once. Real progressive streaming would require either runtime changes or bypassing Iris with a `%lick`-based unix bridge.
 - **One node per shim.** No load balancing, no fallback. The shim's `node` config is a single `@p`.
+- **`Authorization: Bearer 0v...` is reserved by Eyre.** Tokens generated by the shim use a `sk-` prefix to avoid colliding with Urbit's session-token format.
 
-See [`SPEC.md`](./SPEC.md) for the v1+ roadmap (real desk separation, access policies, multi-node routing, true streaming approaches).
+See [`SPEC.md`](./SPEC.md) for the v1+ roadmap (real desk separation, multi-node routing, true streaming approaches).
 
 ## Updating
 
-After install, your ship subscribes to the publisher's desk. When the publisher commits a new revision, your ship pulls it automatically and `gall: bumped` your three agents. No reinstall needed.
+After install, your ship subscribes to the publisher's desk. When the publisher commits a new revision, your ship pulls it automatically and `gall: bumped` the three agents. No reinstall needed.
 
 ## Testing
 
