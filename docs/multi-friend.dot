@@ -1,5 +1,5 @@
-// One node, many friends. The publisher's GPU serves several
-// installed clients, each with their own OpenAI-compatible app.
+// One node, many friends — and each friend points multiple
+// OpenAI-compatible clients at their single shim.
 digraph multi_friend {
   rankdir=LR;
   bgcolor="white";
@@ -14,9 +14,13 @@ digraph multi_friend {
     style="rounded,filled";
     fillcolor="#f7f7f5";
     color="#cccccc";
-    fa_app [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fa_app1 [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fa_app2 [label="OpenCode", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fa_app3 [label="curl", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fa_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fa_app -> fa_shim [color="#4a7bb5"];
+    fa_app1 -> fa_shim [color="#4a7bb5"];
+    fa_app2 -> fa_shim [color="#4a7bb5"];
+    fa_app3 -> fa_shim [color="#4a7bb5"];
   }
 
   subgraph cluster_friend2 {
@@ -26,9 +30,11 @@ digraph multi_friend {
     style="rounded,filled";
     fillcolor="#f7f7f5";
     color="#cccccc";
-    fb_app [label="OpenCode", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fb_app1 [label="AtomicChat", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fb_app2 [label="Open WebUI", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fb_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fb_app -> fb_shim [color="#4a7bb5"];
+    fb_app1 -> fb_shim [color="#4a7bb5"];
+    fb_app2 -> fb_shim [color="#4a7bb5"];
   }
 
   subgraph cluster_friend3 {
@@ -38,13 +44,15 @@ digraph multi_friend {
     style="rounded,filled";
     fillcolor="#f7f7f5";
     color="#cccccc";
-    fc_app [label="curl / shell", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fc_app1 [label="shell script", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fc_app2 [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fc_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fc_app -> fc_shim [color="#4a7bb5"];
+    fc_app1 -> fc_shim [color="#4a7bb5"];
+    fc_app2 -> fc_shim [color="#4a7bb5"];
   }
 
   subgraph cluster_publisher {
-    label="~publisher (GPU machine)";
+    label="friend hosting models";
     fontname="Helvetica";
     fontsize=12;
     style="rounded,filled";
