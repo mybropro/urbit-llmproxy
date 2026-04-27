@@ -168,6 +168,7 @@
         .topo-box \{flex:1;min-width:8em;background:#fff;padding:.6em;border:1px solid #d8e8e0;border-radius:4px;text-align:center}
         .topo-box.you \{border-color:#3aa37a;background:#f0fdf4}
         .topo-box.backend \{border-color:#b54a4a;background:#fef2f2}
+        .topo-box.client \{border-color:#4a7bb5;background:#e8f1fb}
         .topo-box small \{display:block;font-size:.78em;color:#666;margin-top:.2em;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
         .topo-box .role \{display:block;color:#888;font-size:.7em;text-transform:uppercase;letter-spacing:.05em;margin-top:.3em}
         .topo-arrow \{display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3aa37a;font-size:1.5em;font-weight:bold;line-height:1}
@@ -215,6 +216,21 @@
             ;dd:"{?:(client-api-token-set "(set — clients must send Authorization: Bearer <token>)" "(none — endpoint is open to anyone who can reach the URL)")}"
           ==
           ;div(class "topo")
+            ;div(class "topo-box client")
+              ;b: OpenAI clients
+              ;br;
+              ;small: Continue.dev
+              ;br;
+              ;small: OpenCode
+              ;br;
+              ;small: AtomicChat
+              ;br;
+              ;small: curl, etc.
+            ==
+            ;span(class "topo-arrow")
+              ;span:"→"
+              ;small: HTTP
+            ==
             ;div(class "topo-box you")
               ;b: this ship
               ;br;
