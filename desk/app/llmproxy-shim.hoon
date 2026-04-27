@@ -204,7 +204,8 @@
           ;p
             ;small: Example
           ==
-          ;pre:"{curl-example}"
+          ;pre(id "curl-ex"):"{curl-example}"
+          ;button(type "button", onclick "navigator.clipboard.writeText(document.getElementById('curl-ex').textContent);this.textContent='copied!';"): copy
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-node");
             ;label: route requests to this ship's %llmproxy-node
@@ -247,7 +248,7 @@
               ;pre:"{test-response-tape}"
           ;h2: Host a node
           ;p
-            ;small: Let other ships run inference on your hardware.
+            ;small: Let other ships connect to your LLM inference.
           ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "toggle-hosting");
