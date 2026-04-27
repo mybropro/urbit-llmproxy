@@ -1,5 +1,7 @@
 # %llmproxy
 
+![Network topology](docs/multi-friend.svg)
+
 An Urbit desk that turns any ship into an OpenAI-compatible LLM proxy. A node operator with a GPU exposes a local inference server (Ollama, vLLM, llama.cpp, anything that speaks OpenAI's `/v1/chat/completions`) to friends over Ames. Friends install the desk on their own ship, point any OpenAI tool at `http://localhost:<port>/llmproxy`, and their requests transparently traverse Urbit to the node's hardware.
 
 Status: v0.4 — works end-to-end between two ships. See *Known limitations* below for what's honest about it. Full design spec in [`SPEC.md`](./SPEC.md).
@@ -119,9 +121,7 @@ Three Gall agents in one desk:
 | `%llmproxy-shim` | Eyre HTTP handler. Bridges OpenAI HTTP ↔ Gall pokes. *Run this where you want to use the API.* |
 | `%llmproxy-client` | Dojo-driven utility for ad-hoc tests (`:llmproxy-client &noun [%ask ~target-ship 'model' 'prompt']`). Not in the HTTP path. |
 
-A normal install runs all three on the same ship. Shim's `node` config picks which friend's ship to route requests to. Each ship can run multiple OpenAI-compatible apps against its own shim, all sharing the same upstream node.
-
-![Network topology](docs/multi-friend.svg)
+A normal install runs all three on the same ship. Shim's `node` config picks which friend's ship to route requests to. Each ship can run multiple OpenAI-compatible apps against its own shim, all sharing the same upstream node — see the topology diagram at the top of this README.
 
 Source `.dot` files live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
