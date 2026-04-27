@@ -199,7 +199,7 @@
             ;dt: models
             ;dd:"{models-text}"
             ;dt: api token
-            ;dd:"{?:(client-api-token-set "(set — clients must send Authorization: Bearer <token>)" "(none — endpoint is open to anyone with the URL)")}"
+            ;dd:"{?:(client-api-token-set "(set — clients must send Authorization: Bearer <token>)" "(none — endpoint is open to anyone who can reach the URL)")}"
           ==
           ;p
             ;small: Example
