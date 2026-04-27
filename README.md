@@ -119,13 +119,7 @@ Three Gall agents in one desk:
 | `%llmproxy-shim` | Eyre HTTP handler. Bridges OpenAI HTTP ↔ Gall pokes. *Run this where you want to use the API.* |
 | `%llmproxy-client` | Dojo-driven utility for ad-hoc tests (`:llmproxy-client &noun [%ask ~target-ship 'model' 'prompt']`). Not in the HTTP path. |
 
-A normal install runs all three on the same ship. Shim's `node` config picks which ship's `%llmproxy-node` to actually use — same ship (default) or a remote one.
-
-### Single-ship install
-
-You're the only person involved. Shim's `node` defaults to `our.bowl`, so HTTP comes in, gets routed locally between agents, and the node calls Ollama directly.
-
-![Single-ship install](docs/single-ship.svg)
+A normal install runs all three on the same ship. Shim's `node` config picks which publisher's ship to route requests to.
 
 ### Two-ship deployment
 
@@ -133,7 +127,7 @@ A publisher runs the GPU; a friend installs the desk and configures their shim's
 
 ![Two-ship deployment](docs/two-ship.svg)
 
-Source `.dot` files for both diagrams live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
+Source `.dot` files live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
 ## Access policy
 

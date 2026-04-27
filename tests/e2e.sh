@@ -114,14 +114,14 @@ assert_body_contains() {
   fi
 }
 
-# Read the @p of a ship by hitting /llmproxy/ui and grepping the response.
+# Read the @p of a ship from Eyre's session cookie. Reliable regardless
+# of UI state (hosting on/off, what node the shim is pointed at, etc).
 ship_of() {
   local base="$1"
-  curl -sS --max-time 5 "$base/llmproxy/ui" \
-    | grep -oE 'value="(~[a-z-]+)"[^>]*placeholder="~sampel-palnet"' \
+  curl -sSI --max-time 5 "$base/llmproxy/ui" \
+    | grep -oE 'urbauth-~[a-z-]+' \
     | head -1 \
-    | grep -oE '~[a-z-]+' \
-    | head -1
+    | sed 's/urbauth-//'
 }
 
 # ─── setup ─────────────────────────────────────────────────────────────
@@ -160,6 +160,7 @@ reset_t1() {
   if curl -sS --max-time 5 "$T1/llmproxy/ui" | grep -q '>turn on hosting<'; then
     ui_post "$T1" --data-urlencode "action=toggle-hosting"
   fi
+  sleep 1   # let the queued shim → node pokes settle
 }
 
 # ─── test scenarios ────────────────────────────────────────────────────
@@ -169,7 +170,7 @@ test_ui_renders() {
   local code
   code=$(curl -sS --max-time 5 -o /tmp/e2e-body -w '%{http_code}' "$T1/llmproxy/ui")
   assert_status "$code" "200" || return 1
-  assert_body_contains "<h2>Use as a client</h2>"
+  assert_body_contains "<summary>Use as a client</summary>"
 }
 
 test_models_endpoint() {
@@ -203,6 +204,7 @@ test_whitelist_allows_listed_ship() {
   ui_post "$T1" \
     --data-urlencode "action=set-policy-ships" \
     --data-urlencode "ships=$T2_SHIP"
+  sleep 2   # let the shim → node poke propagate
   unset BEARER
   local code
   code=$(chat_status "$T2")
@@ -225,6 +227,7 @@ test_blacklist_blocks_listed_ship() {
   ui_post "$T1" \
     --data-urlencode "action=set-policy-ships" \
     --data-urlencode "ships=$T2_SHIP"
+  sleep 2
   unset BEARER
   local code
   code=$(chat_status "$T2")

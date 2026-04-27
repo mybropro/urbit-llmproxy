@@ -160,6 +160,10 @@
         h1 \{color:#444;border-bottom:1px solid #ccc;padding-bottom:.3em;margin-bottom:.4em}
         h2 \{color:#444;font-size:1.25em;margin-top:2.2em;margin-bottom:.3em;border-bottom:1px solid #ececec;padding-bottom:.2em}
         h3 \{color:#666;font-size:1em;margin-top:1.6em;margin-bottom:.2em;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+        details \{margin:1.5em 0}
+        summary \{color:#444;font-size:1.25em;font-weight:600;cursor:pointer;padding:.4em 0;border-bottom:1px solid #ececec;list-style-position:outside;user-select:none}
+        summary:hover \{color:#3aa37a}
+        details[open] > summary \{margin-bottom:.6em}
         form \{background:#f7f7f5;padding:1em;border-radius:6px;margin:1em 0;border:1px solid #ececec}
         label \{display:block;margin:.5em 0 .2em;font-weight:600;font-size:.9em;color:#555}
         input[type=text],select,textarea \{width:100%;padding:.5em;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:.95em}
@@ -187,10 +191,11 @@
           ;h1: llmproxy
           ;+  ?:  =('' msg)  ;span;
               ;p(class "msg"):"{msg-text}"
-          ;h2: Use as a client
-          ;p
-            ;small: Use the URL below in OpenCode, AtomicChat, or any app that wants an OpenAI-compatible endpoint. Requests are routed through this ship to a node operator's hardware.
-          ==
+          ;details(open "")
+            ;summary: Use as a client
+            ;p
+              ;small: Use the URL below in OpenCode, AtomicChat, or any app that wants an OpenAI-compatible endpoint. Requests are routed through this ship to a node operator's hardware.
+            ==
           ;dl
             ;dt: api endpoint
             ;dd:"POST {api-base-text}/v1/chat/completions"
@@ -221,13 +226,15 @@
             ;button(type "submit", name "action", value "set-client-api-token"): update
             ;button(type "submit", name "action", value "generate-api-token"): generate random
           ==
-          ;p
-            ;small: Models auto-populate from the node when you change it. To change what's offered, ask the node operator.
+            ;p
+              ;small: Models auto-populate from the node when you change it. To change what's offered, ask the node operator.
+            ==
           ==
-          ;h2: Test
-          ;p
-            ;small: Send a prompt through to confirm the connection works.
-          ==
+          ;details(open "")
+            ;summary: Test
+            ;p
+              ;small: Send a prompt through to confirm the connection works.
+            ==
           ;form(method "post", action "/llmproxy/ui", onsubmit "var b=this.querySelector('button');b.disabled=true;b.textContent='waiting for response...';")
             ;input(type "hidden", name "action", value "test");
             ;label: model
@@ -244,12 +251,14 @@
             ;br;
             ;button(type "submit"): send
           ==
-          ;+  ?:  =('' test-response)  ;span;
-              ;pre:"{test-response-tape}"
-          ;h2: Host a node
-          ;p
-            ;small: Let other ships connect to your LLM inference.
+            ;+  ?:  =('' test-response)  ;span;
+                ;pre:"{test-response-tape}"
           ==
+          ;details
+            ;summary: Host a node
+            ;p
+              ;small: Let other ships connect to your LLM inference.
+            ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "toggle-hosting");
             ;button(type "submit"):"{?:(hosting "turn off hosting" "turn on hosting")}"
@@ -273,7 +282,7 @@
                 ==
                 ;form(method "post", action "/llmproxy/ui")
                   ;input(type "hidden", name "action", value "set-backend-key");
-                  ;label: api key (Bearer token; leave empty to remove)
+                  ;label: api key to send to your local OpenAI-compatible server (leave empty to remove)
                   ;br;
                   ;input(type "password", name "key", placeholder "sk-...", size "60");
                   ;button(type "submit"): update api key
@@ -317,6 +326,7 @@
                   ;li: Have them point their shim's node at your @p via this same form.
                 ==
               ==
+          ==
           ;p
             ;small: %llmproxy-shim
           ==
