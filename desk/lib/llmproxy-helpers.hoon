@@ -1,4 +1,4 @@
-::  /lib/llmproxy-helpers: pure helpers used by %llmproxy-{node,shim}.
+::  /lib/llmproxy-helpers: pure helpers used by %llmproxy-{node,client}.
 ::
 ::  Anything that's a pure function with no scry, no card-building, no
 ::  mark-typing lives here. Agents import via /+ llmproxy-helpers and

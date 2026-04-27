@@ -1,5 +1,5 @@
 // One node, many friends — and each friend points multiple
-// OpenAI-compatible clients at their single shim.
+// OpenAI-compatible apps at their single %llmproxy-client.
 digraph multi_friend {
   rankdir=LR;
   bgcolor="white";
@@ -17,10 +17,10 @@ digraph multi_friend {
     fa_app1 [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fa_app2 [label="OpenCode", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fa_app3 [label="curl", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
-    fa_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fa_app1 -> fa_shim [color="#4a7bb5"];
-    fa_app2 -> fa_shim [color="#4a7bb5"];
-    fa_app3 -> fa_shim [color="#4a7bb5"];
+    fa_client [label="%llmproxy-client", fillcolor="#fff7d8", color="#c9a000"];
+    fa_app1 -> fa_client [color="#4a7bb5"];
+    fa_app2 -> fa_client [color="#4a7bb5"];
+    fa_app3 -> fa_client [color="#4a7bb5"];
   }
 
   subgraph cluster_friend2 {
@@ -32,9 +32,9 @@ digraph multi_friend {
     color="#cccccc";
     fb_app1 [label="AtomicChat", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fb_app2 [label="Open WebUI", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
-    fb_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fb_app1 -> fb_shim [color="#4a7bb5"];
-    fb_app2 -> fb_shim [color="#4a7bb5"];
+    fb_client [label="%llmproxy-client", fillcolor="#fff7d8", color="#c9a000"];
+    fb_app1 -> fb_client [color="#4a7bb5"];
+    fb_app2 -> fb_client [color="#4a7bb5"];
   }
 
   subgraph cluster_friend3 {
@@ -46,9 +46,9 @@ digraph multi_friend {
     color="#cccccc";
     fc_app1 [label="shell script", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
     fc_app2 [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
-    fc_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
-    fc_app1 -> fc_shim [color="#4a7bb5"];
-    fc_app2 -> fc_shim [color="#4a7bb5"];
+    fc_client [label="%llmproxy-client", fillcolor="#fff7d8", color="#c9a000"];
+    fc_app1 -> fc_client [color="#4a7bb5"];
+    fc_app2 -> fc_client [color="#4a7bb5"];
   }
 
   subgraph cluster_publisher {
@@ -64,8 +64,8 @@ digraph multi_friend {
   ollama [label="Ollama / vLLM",
           shape=cylinder, fillcolor="#fde8e8", color="#b54a4a"];
 
-  fa_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
-  fb_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
-  fc_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  fa_client -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  fb_client -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  fc_client -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
   pub_node -> ollama [label="HTTP via %iris", color="#b54a4a"];
 }

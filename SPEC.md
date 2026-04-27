@@ -1,322 +1,348 @@
-# %llmproxy — Urbit LLM Proxy
+# %llmproxy — design spec
+
+This spec describes the current implementation. The README covers install
+and use; this doc covers the wire shapes, agent responsibilities, and the
+edges where things get interesting.
 
 ## What it is
 
-`%llmproxy` is an Urbit desk that turns any Urbit ship into an OpenAI-compatible LLM proxy. A ship running a **node** agent exposes its local inference backend (Ollama, llama.cpp, vLLM, etc.) to other ships over Ames. A ship running the **client + shim** agents gets a local HTTP endpoint that any OpenAI-compatible tool can point at — Continue.dev, Open WebUI, shell scripts using `curl`, anything.
+`%llmproxy` is an Urbit desk that turns any ship into an OpenAI-compatible
+LLM proxy. A ship running the **node** agent forwards inference requests
+from peers to a local OpenAI-compatible HTTP backend (Ollama, vLLM,
+llama.cpp's server, OpenAI direct, etc.). A ship running the **client**
+agent exposes `/llmproxy/v1/chat/completions` and `/llmproxy/v1/models` over
+Eyre, plus a `/llmproxy/ui` config page, and pokes a configured node ship
+over Ames to do the actual work.
 
-The key properties:
+Both agents are in the same desk. Most installs run both on one ship; the
+node-only or client-only deployments are also valid.
 
-- **No coordinator.** There is no central server. Each node is sovereign — it sets its own access policy, manages its own queue, and decides who can submit jobs.
-- **No open ports on the node.** The node's Ollama backend is never exposed to the internet. All communication goes through Urbit's Ames protocol, which handles NAT traversal, encryption, and authentication natively.
-- **Identity is free.** Urbit `@p` ships are the auth layer. No API keys, no accounts, no HMAC tokens.
-- **One desk, multiple roles.** Both ships install the same `%llmproxy` desk. Each operator starts only the agents they need.
+Properties:
 
----
-
-## Roles
-
-### Node operator
-
-Someone with a GPU (or any machine running a local LLM backend) who wants to serve inference to other ships.
-
-Runs: `%llmproxy-node`
-
-Configures: which models to advertise, access policy (open / galaxy-only / whitelist), Ollama backend URL.
-
-### Client user
-
-Someone who wants to use LLMs via Urbit and has an existing tool (Continue.dev, Open WebUI, etc.) that speaks the OpenAI API.
-
-Runs: `%llmproxy-client` + `%llmproxy-shim`
-
-Configures: which node ship(s) to connect to.
-
-### Both
-
-A single ship can run all three agents simultaneously — useful for someone who wants to serve inference and use it locally.
+- **No coordinator.** Each node is sovereign — it sets its own access
+  policy, picks its own backend, and decides who can submit jobs.
+- **No open ports on the node.** The backend is reachable only from
+  localhost; cross-ship calls go through Ames, which handles NAT
+  traversal, encryption, and authentication natively.
+- **Identity-based auth.** The node's access policy is `@p`-based. A
+  separate Bearer-token gate on the client's HTTP layer is optional.
+- **One desk, two agents.** Both shipped together. Whether you serve, use,
+  or both is a runtime config decision via `/llmproxy/ui`.
 
 ---
 
-## Installation
-
-```
-|install ~node %llmproxy
-```
-
-Then start the agents you need:
-
-```
-:: node operator
-|start %llmproxy-node
-
-:: client user
-|start %llmproxy-client
-|start %llmproxy-shim
-```
-
----
-
-## Agent overview
+## Agents
 
 ### `%llmproxy-node`
 
-The inference-serving agent. Runs on any ship with a local LLM backend.
+Run this where the inference backend lives. Accepts `%llmproxy-job` pokes
+from peers (gated by access policy), POSTs to the backend's
+`/v1/chat/completions`, and emits the result as a single
+`%llmproxy-token` fact on `/job/<nonce>`.
 
-**Responsibilities:**
-- Accepts job submissions from client ships over Ames
-- Enforces access policy (open, galaxy-only, or explicit whitelist)
-- Maintains a local priority queue
-- Dispatches jobs to a local Ollama/vLLM/llama.cpp backend via HTTP thread
-- Streams token chunks back to the requesting ship as Gall subscription facts
+**Responsibilities**
 
-**Configuration pokes:**
+- Enforce the access policy on incoming `%llmproxy-job` pokes
+- Build the upstream HTTP request (`build-body`, `build-headers`)
+- Track the request via Iris (`%i` `%request`) on a `/req/<nonce>` wire
+- On `%http-response %finished`, parse the JSON, extract the assistant
+  text via `extract-content`, and emit a final `token-chunk` fact +
+  `%kick` on `/job/<nonce>`
+- Periodically refresh advertised models by GETting `/v1/models` from the
+  backend and parsing with `parse-models-list`
+- Publish the model list as `%llmproxy-models` facts on `/models` (the
+  client subscribes to this)
+
+**Configuration pokes (mark `%noun`)**
+
 ```
-::  set which models this node advertises
-:llmproxy-node %set-models ~[%llama3-8b %mistral-7b]
-
-::  set access policy
-:llmproxy-node %set-policy [%open ~]
-:llmproxy-node %set-policy [%whitelist (sy ~[~zod ~nec])]
-:llmproxy-node %set-policy [%galaxy-only ~]
-
-::  set local backend URL
-:llmproxy-node %set-backend 'http://localhost:11434'
+[%set-backend url=@t]         :: where the backend's /v1/chat/completions lives
+[%set-backend-key key=@t]     :: optional Bearer key sent upstream
+[%set-policy =access-policy]  :: who can submit jobs
+[%refresh-models ~]           :: re-GET /v1/models from the backend
 ```
 
-**State:**
+**State (`state-0`)**
+
 ```hoon
-+$  node-state
-  $:  models=(list model-id)       ::  advertised models
-      policy=access-policy         ::  who can submit
-      queue=(list job-req)         ::  pending jobs
-      active=(unit job-id)         ::  currently running job
-      rate-limits=(map @p @ud)     ::  requests/hour per ship
-      backend-url=@t               ::  local inference backend
++$  state-0
+  $:  %0
+      backend-url=@t                       :: e.g. http://localhost:11434/v1/chat/completions
+      backend-key=@t                       :: empty = no Authorization sent upstream
+      policy=access-policy:llmproxy
+      advertised=(list @t)                 :: cached models list
+      pending=(map @ud pending-job)        :: in-flight Iris requests
   ==
 ```
+
+**Scry endpoints**
+
+```
+.^((list @t)         %gx /=llmproxy-node=/advertised/noun)
+.^(access-policy:llmproxy %gx /=llmproxy-node=/policy/noun)
+.^(@t                 %gx /=llmproxy-node=/backend/noun)
+.^(@t                 %gx /=llmproxy-node=/backend-key/noun)
+```
+
+The client uses `/advertised/noun` to render the UI and `/v1/models`
+synchronously when the configured node is local — this avoids a fact
+round-trip on cold loads.
 
 ---
 
 ### `%llmproxy-client`
 
-The Urbit-side client agent. Manages node connections and routes jobs.
+Run this where you want to use the API. Binds `/llmproxy` on Eyre, serves
+the config UI (Sail), and routes OpenAI HTTP traffic to a configured node
+over Ames.
 
-**Responsibilities:**
-- Maintains a registry of known node ships (manually added by the user)
-- On job submission from the shim, selects the appropriate node by model name
-- Pokes the node ship with the job over Ames
-- Subscribes to the node's `/job/[id]` path to receive streaming token chunks
-- Forwards token chunks to the shim for SSE delivery
+**Responsibilities**
 
-**Configuration pokes:**
+- Bind `/llmproxy` via `[%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]`
+- Serve `GET /llmproxy/ui` (Sail-rendered config page) and handle `POST
+  /llmproxy/ui` form actions
+- Serve `GET /llmproxy/v1/models` (passthrough of node's `advertised`
+  list) and `POST /llmproxy/v1/chat/completions` (OpenAI-format request →
+  `%llmproxy-job` poke → SSE or single-JSON HTTP response)
+- Maintain a single `node=@p` config — the ship that handles inference
+- Subscribe to that node's `/models` to keep the advertised list fresh
+- Optionally gate HTTP requests with a Bearer token (`bearer-ok`)
+- Accept `[%ask target=@p model=@t prompt=@t]` from dojo (mark `%noun`)
+  for ad-hoc testing — same poke / watch path, prints with `~&`
+
+**Configuration: via `/llmproxy/ui` HTML forms.** The form actions are:
+
 ```
-::  add a node ship (fetches its capabilities automatically)
-:llmproxy-client %add-node ~sampel-palnet
-
-::  remove a node
-:llmproxy-client %remove-node ~sampel-palnet
-
-::  refresh a node's advertised capabilities
-:llmproxy-client %refresh-node ~sampel-palnet
+set-node              :: change which @p handles inference
+set-backend           :: pokes node with %set-backend
+set-backend-key       :: pokes node with %set-backend-key
+refresh-models        :: pokes node with %refresh-models
+toggle-policy-mode    :: flip whitelist <-> blacklist
+set-policy-ships      :: replace the policy's ships set
+set-client-api-token  :: HTTP-layer Bearer token (empty = open)
+generate-api-token    :: emit a random sk-prefixed token
+toggle-hosting        :: cosmetic flag controlling whether the
+                         "Host a node" section is expanded
+test                  :: send a one-off prompt via the same poke path
 ```
 
-**State:**
+**State (`state-0`)**
+
 ```hoon
-+$  client-state
-  $:  nodes=(map @p node-ad)       ::  known node ships + their capabilities
-      jobs=(map job-id job-state)  ::  active and recent jobs
++$  state-0
+  $:  %0
+      nonce=@ud                            :: monotonic per-request key
+      node=@p                              :: which ship handles inference
+      models=(list @t)                     :: cached from /models subscription
+      backend=@t                           :: mirrors the node's backend (for UI display)
+      backend-key=@t                       :: same — local copy of node's key
+      client-api-token=@t                  :: HTTP Bearer gate; empty = no auth
+      policy=access-policy:llmproxy        :: mirror of node's policy (for UI)
+      hosting=?                            :: UI-only — expand the node-config section
+      pending=(map @ud pending-client)     :: in-flight requests awaiting a fact
+  ==
+
++$  pending-client
+  $:  eyre-id=@ta                          :: empty for %dojo
+      target=@p                            :: which node we poked
+      model=@t
+      stream=?
+      kind=?(%openai %test %dojo)
+      prompt=@t
+      api-base=@t                          :: for the %test re-render
   ==
 ```
 
-When `%add-node` is called, the client pokes the target ship with `%ping` to fetch its current `node-ad` (model list, queue depth, policy). If the node's policy rejects the requesting ship, an error is returned immediately.
+**HTTP endpoints**
 
----
-
-### `%llmproxy-shim`
-
-An Eyre HTTP handler. Translates between the OpenAI API and Gall pokes.
-
-**Responsibilities:**
-- Binds the `/llmproxy` path on the ship's HTTP server
-- Handles `POST /llmproxy/v1/chat/completions` — parses OpenAI request JSON, pokes `%llmproxy-client`, holds the connection open, streams SSE `data:` chunks as token gifts arrive, closes with `data: [DONE]`
-- Handles `GET /llmproxy/v1/models` — returns all models across all known nodes in OpenAI format
-
-**Auth:** Eyre's existing session authentication gates all requests to the ship owner. The `Authorization` header sent by OpenAI clients is accepted but not validated — any non-empty value works.
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/llmproxy/ui` | Sail-rendered HTML config page |
+| POST | `/llmproxy/ui` | Form-encoded action dispatch (see actions above) |
+| GET | `/llmproxy/v1/models` | OpenAI-format model list |
+| POST | `/llmproxy/v1/chat/completions` | OpenAI chat. Honors `stream`. Returns SSE if true, single JSON otherwise. |
 
 ---
 
 ## Protocol types (`sur/llmproxy.hoon`)
 
 ```hoon
-+$  model-id  @tas
-::  e.g. %llama3-8b, %mistral-7b-instruct
-
-+$  job-id    [src=@p time=@da nonce=@ud]
-::  globally unique without a coordinator
-
-+$  message
-  $:  role=?(%system %user %assistant)
-      content=@t
-  ==
++$  job-id  [src=@p time=@da nonce=@ud]    :: globally unique without a coordinator
 
 +$  job-req
   $:  id=job-id
-      model=model-id
-      messages=(list message)
-      params=job-params
-  ==
-
-+$  job-params
-  $:  temperature=@rs
-      max-tokens=@ud
-      stream=?
+      model=@t
+      prompt=@t
   ==
 
 +$  token-chunk
   $:  id=job-id
-      seq=@ud        ::  ordering guarantee across Ames messages
-      text=@t        ::  may contain 1..10 tokens (see batching rule)
+      seq=@ud
+      text=@t
       done=?
   ==
 
-+$  node-ad
-  $:  ship=@p
-      models=(list model-id)
-      queue-depth=@ud
-      policy=access-policy
-      updated=@da
-  ==
-
 +$  access-policy
-  $%  [%open ~]
-      [%galaxy-only ~]
-      [%whitelist ships=(set @p)]
-      [%moons-of ship=@p]      ::  any moon under this planet (^sein:title)
+  $%  [%whitelist ships=(set @p)]          :: deny by default; ships are allowed
+      [%blacklist ships=(set @p)]          :: allow by default; ships are denied
   ==
+```
+
+The node's own ship is always allowed regardless of policy mode.
+
+The `seq` field on `token-chunk` is reserved for future progressive
+streaming. Today every job emits exactly one chunk with `done=%.y`, so
+`seq` is always `0`.
+
+## Marks
+
+```
+mar/llmproxy/job.hoon      :: %llmproxy-job   = job-req
+mar/llmproxy/token.hoon    :: %llmproxy-token = token-chunk
+mar/llmproxy/models.hoon   :: %llmproxy-models = (list @t)
 ```
 
 ---
 
 ## Job lifecycle
 
-1. **User tool** sends `POST /llmproxy/v1/chat/completions` to `http://localhost:8080/llmproxy`
-2. **Shim** parses the request, extracts model name and messages, pokes `%llmproxy-client` with `%submit`
-3. **Client** looks up the requested model in its `nodes` map, selects the node serving it, generates a `job-id`, pokes the node ship with `%submit-job` over Ames, subscribes to `/job/[job-id]` on that ship
-4. **Node** receives the poke, checks policy and rate limits, appends to queue, dispatches to a Hoon thread if idle
-5. **Thread** POSTs to the configured **OpenAI-compatible** `/v1/chat/completions` endpoint with `stream: true`, reads SSE response, batches tokens (see *Chunk batching*), emits `token-chunk` gifts back to the node agent
-6. **Node** forwards each `token-chunk` as a subscription fact on `/job/[job-id]`
-7. **Client** receives facts, forwards as gifts to the shim
-8. **Shim** serializes each chunk as an SSE `data:` event, flushes to the open HTTP connection
-9. **User tool** receives streamed tokens in real time, same as any OpenAI-compat server
+A typical OpenAI HTTP call from a tool like Continue.dev:
+
+1. **Tool** sends `POST /llmproxy/v1/chat/completions` to the local ship.
+2. **Eyre** routes to `%llmproxy-client` via `%handle-http-request`.
+3. **Client** checks `bearer-ok`, parses the OpenAI body
+   (`parse-openai-request`), assigns a nonce, builds a `job-req`, and emits:
+   - a `%poke %llmproxy-job` to `[node %llmproxy-node]` on wire `/poke/<n>`
+   - a `%watch /job/<n>` to the same agent on wire `/watch/<n>`
+   It records a `pending-client` keyed by `<n>` with the eyre-id.
+4. **Node** receives the poke, runs `allowed src.bowl our.bowl policy`. On
+   denial it crashes the poke (`!!`) — Gall ack-nacks the client. On
+   allow it builds an Iris request, passes `[%i %request ...]` on wire
+   `/req/<n>`, and stores a `pending-job`.
+5. **Iris** delivers `[%http-response %finished ...]` on `/req/<n>`.
+   Node converts the response, extracts the assistant text, builds a
+   `token-chunk` with `done=%.y`, and emits a `%fact` + `%kick` on
+   `/job/<n>`.
+6. **Client** receives the fact on `/watch/<n>`, looks up the pending
+   record, and:
+   - For `%openai`: emits SSE chunks (`sse-cards`) or a single JSON body
+     (`give-simple-payload` + `build-completion-json`) depending on
+     `stream`.
+   - For `%test`: re-renders the UI with the response in a `<pre>` block.
+   - For `%dojo`: prints with `~&` and emits no HTTP cards.
+   It then leaves the subscription and deletes the pending record.
+
+If step 4 nacks (poke ack with non-null `p.sign`), the client emits HTTP
+403 ("poke rejected by node (likely access policy)") to the eyre-id and
+leaves the watch.
+
+If the watch ack itself fails (node unreachable / agent not running), the
+client emits HTTP 502 ("node unreachable").
 
 ---
 
-## Client configuration (Continue.dev example)
+## Auth
 
-After installing and starting agents, the user adds a provider in their tool's config:
+Two independent gates:
 
-```json
-{
-  "models": [
-    {
-      "title": "Llama 3 via Urbit",
-      "provider": "openai",
-      "model": "llama3-8b",
-      "apiBase": "http://localhost:8080/llmproxy",
-      "apiKey": "urbit"
-    }
-  ]
-}
+**Node-side: access policy.** Enforced inside `%llmproxy-job` poke
+handling. `whitelist` denies by default and only allows listed ships;
+`blacklist` allows by default and denies listed ships. The node's own
+ship is always allowed. The check is the pure `allowed` arm in
+`lib/llmproxy-helpers.hoon`. Denied requests crash the poke, which the
+client surfaces as HTTP 403.
+
+**Client-side: optional Bearer token.** The client compares the incoming
+`Authorization: Bearer ...` header against `client-api-token`. Empty
+token disables the check. Non-empty requires an exact match. Mismatch
+returns HTTP 401.
+
+**Token format reservation.** Eyre intercepts
+`Authorization: Bearer 0v...` as a session-token lookup, so tokens
+generated via the UI's "generate random" button are prefixed with `sk-`
+to keep them out of that path. Manually-set tokens can be any non-empty
+cord.
+
+---
+
+## Streaming caveat
+
+The OpenAI request honors `stream: true` and the response is a properly
+formed SSE event stream — but Iris (Urbit's HTTP client) buffers the
+upstream backend's response fully before delivering it to the agent. The
+node has nothing to forward until the whole inference completes. From
+the curl client's perspective: silence, then all chunks at once.
+
+True progressive streaming would require either runtime changes to Iris
+(stream chunk events into Arvo as they arrive) or replacing the Iris
+hop with a `%lick`-based unix bridge that pipes the backend's SSE
+output. Out of scope here.
+
+---
+
+## State migration
+
+Both agents' `on-load` use a `mole`-wrapped `!<` to deserialize the saved
+vase. On failure, they log and call `on-init`. This avoids the standard
+Gall `%load-failed` hard-stop when the state shape changes between desk
+revisions, at the cost of silently dropping the old state.
+
+```hoon
+=/  loaded  (mole |.(!<(state-0 vase)))
+?~  loaded
+  ~&  >>  %llmproxy-client-reset-state
+  on-init
+`this(state u.loaded)
 ```
 
-`apiBase` is always `http://[ship-host]:8080/llmproxy`. For a locally-running ship that's `localhost:8080`. For a ship running on a VPS it would be the server's domain or IP.
-
-`model` must match the `model-id` atom the node was configured with (e.g. `llama3-8b`).
-
-`apiKey` can be any non-empty string — it is not validated.
+This is the right tradeoff for a hobbyist desk where the operator can
+reconfigure via UI in two minutes. A production desk would build proper
+versioned state migrations.
 
 ---
 
-## Access policy on nodes
-
-Node operators control who can submit jobs:
-
-| Policy | Effect |
-|--------|--------|
-| `[%open ~]` | Any ship can submit |
-| `[%galaxy-only ~]` | Only ships sponsored by galaxies (filters out comets) |
-| `[%whitelist ships=(set @p)]` | Explicit list of permitted ships |
-| `[%moons-of ship=@p]` | Any moon whose parent (`^sein:title`) is this planet |
-
-Rejected submissions receive an immediate `%error` gift with a reason. The client surfaces this as an HTTP error to the shim.
-
----
-
-## Desk structure
+## Desk layout
 
 ```
-llmproxy/
-  app.hoon                  ::  desk config
-  sur/
-    llmproxy.hoon           ::  shared molds
+desk/
+  desk.bill                  :: %llmproxy-node, %llmproxy-client
+  desk.docket-0              :: app metadata
+  sur/llmproxy.hoon          :: shared types
   app/
-    node.hoon               ::  %llmproxy-node
-    client.hoon             ::  %llmproxy-client
-    shim.hoon               ::  %llmproxy-shim
-  mar/
-    llmproxy/
-      job.hoon              ::  job-req mark
-      token.hoon            ::  token-chunk mark
-      ad.hoon               ::  node-ad mark
+    llmproxy-node.hoon
+    llmproxy-client.hoon
   lib/
-    llmproxy.hoon           ::  shared helpers
-  thread/
-    run-job.hoon            ::  async Ollama HTTP + streaming
+    llmproxy-helpers.hoon    :: pure helpers (allowed, parsers, builders)
+  mar/llmproxy/
+    job.hoon                 :: %llmproxy-job   = job-req
+    token.hoon               :: %llmproxy-token = token-chunk
+    models.hoon              :: %llmproxy-models = (list @t)
+  tests/
+    lib/llmproxy-helpers.hoon  :: hoon unit tests for pure helpers
+tests/
+  e2e.sh                     :: bash HTTP-level tests
+docs/
+  multi-friend.dot/.svg/.png :: deployment topology diagram
 ```
+
+`lib/llmproxy-helpers.hoon` exists so that auth checks, JSON/form/CSV
+parsers, builders, and tape utilities are unit-testable in isolation
+without spinning up Gall agents.
 
 ---
 
-## Chunk batching
+## Out of scope (today)
 
-To avoid one Ames message per token (200-message round trips for a typical response), the run-job thread batches tokens before emitting a `token-chunk` gift. Flush rule:
+These are deliberate exclusions, not bugs:
 
-- **10 tokens accumulated**, OR
-- **3 seconds elapsed since the last flush**, OR
-- **`done=%.y`** (final chunk, always flushed regardless of size)
-
-whichever comes first. `seq` is monotonic per `job-id` and increments once per emitted chunk, not once per token. The shim re-emits each chunk as a single SSE `data:` event with the joined text — OpenAI's streaming spec permits multi-token deltas, so clients render identically.
-
-This trades ~10x fewer Ames messages for up to 3 s of additional perceived latency at the tail of generation when models slow down. The 3 s ceiling is a safety net; in practice the 10-token trigger fires first for any model running >3.3 tokens/sec.
-
----
-
-## Open questions / v2 considerations
-
-**Backend format** — v1 supports **OpenAI-compatible HTTP endpoints only** (`POST /v1/chat/completions` with `stream: true`). This covers Ollama (via its `/v1/*` compat layer), vLLM, llama.cpp's server, LM Studio, TGI, and most other inference servers. Native non-compat formats (Ollama's `/api/chat`, raw llama.cpp completions API, etc.) are out of scope.
-
-**Discovery / directory** — for v1, node ships are added manually with `%add-node`. With the moon-per-model deployment pattern this means an operator running 5 models has 5 moons that each client must add by `@p`. A v2 directory agent (`%llmproxy-dir`) is the natural fix: nodes advertise capabilities to a well-known ship, clients query by model. Out of scope for v1.
-
-**Multi-node routing** — the client currently picks the first node serving the requested model. A smarter strategy (lowest queue depth, lowest latency, preferred ship list) is a natural v2 improvement once the basic protocol is working.
-
----
-
-## Deployment pattern: moons per model
-
-The intended deployment for a node operator is **one moon per model**, all spawned under a single planet. A moon is a free, sponsored sub-identity — `|moon` from a planet's dojo issues new keys; the moon ship name is deterministic from the parent. An operator with 4 models spawns 4 moons:
-
-```
-~sampel-palnet                   ::  parent planet (no node agent needed)
-~doznec-pinwod-sampel-palnet     ::  moon serving llama3-8b
-~ridlur-figbud-sampel-palnet     ::  moon serving mistral-7b
-~litzod-norsep-sampel-palnet     ::  moon serving qwen-32b
-~dapwep-fadted-sampel-palnet     ::  moon serving deepseek-coder-33b
-```
-
-Each moon runs `%llmproxy-node` with its own backend URL (likely a different port or host) and advertises its single model. Benefits:
-
-- **Resource isolation** — each moon is its own urbit process, with its own pier, queue, and event log. A crash in the qwen-32b moon doesn't take down the others.
-- **Per-model access policy** — the operator may want `%open` on a small model and `%moons-of` (org-only) on a large one.
-- **Cheap horizontal scale** — adding a model = `|moon` + boot + start agent. No re-deploy, no agent state migration.
-- **Trust inheritance** — the `%moons-of ship=@p` policy lets every moon of a planet trust every other moon for free.
-
-The protocol still permits a single node to advertise multiple models (`models=(list model-id)`) — useful for an operator running two small models on one box without bothering with separate moons. The multi-moon pattern is a *convention*, not a constraint.
+- **Multi-node routing.** The client has a single `node=@p`. No
+  fallback, no load-balancing, no model-aware dispatch.
+- **A directory.** Nodes are added by typing a `@p` into the UI form.
+  No discovery service.
+- **Per-ship rate limits or queueing.** The node has a `pending` map
+  keyed by nonce, but nothing throttles concurrent jobs from the same
+  ship beyond what the backend itself enforces.
+- **Galaxy/star/moon-based policies.** Only flat whitelist/blacklist.
+- **True progressive streaming.** See the streaming caveat above.
+- **Multi-model node config.** A node has one backend URL. The
+  `models` list is whatever the backend's `/v1/models` advertises.

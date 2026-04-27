@@ -2,7 +2,7 @@
 #
 # End-to-end behavioral tests for %llmproxy.
 #
-# Drives the running shim's HTTP API to exercise auth/policy/discovery
+# Drives the running %llmproxy-client's HTTP API to exercise auth/policy/discovery
 # paths. Assumes:
 #
 #   - test1 ship is reachable at $T1 (default http://localhost:80)
@@ -11,7 +11,7 @@
 #     and has %llmproxy installed.
 #   - Both ships' HTTP ports accept unauthenticated localhost requests
 #     (Eyre's default behavior).
-#   - test2's shim points its `node` at test1 (set via the UI or via
+#   - test2's %llmproxy-client points its `node` at test1 (set via the UI or via
 #     the SET_T2_NODE_TO_T1 var below — script does it idempotently).
 #
 # Run: bash tests/e2e.sh
@@ -56,7 +56,7 @@ run() {
   fi
 }
 
-# Configure the shim at $1 via /llmproxy/ui POST.
+# Configure the %llmproxy-client at $1 via /llmproxy/ui POST.
 ui_post() {
   local base="$1"; shift
   curl -sS --max-time 10 -X POST "$base/llmproxy/ui" \
@@ -115,7 +115,7 @@ assert_body_contains() {
 }
 
 # Read the @p of a ship from Eyre's session cookie. Reliable regardless
-# of UI state (hosting on/off, what node the shim is pointed at, etc).
+# of UI state (hosting on/off, what node the client is pointed at, etc).
 ship_of() {
   local base="$1"
   curl -sSI --max-time 5 "$base/llmproxy/ui" \
@@ -139,7 +139,7 @@ setup_ships() {
   fi
   printf '%s T1=%s @%s\n' "$(color dim '·')" "$T1" "$T1_SHIP"
   printf '%s T2=%s @%s\n' "$(color dim '·')" "$T2" "$T2_SHIP"
-  # Point T2's shim at T1's node (idempotent)
+  # Point T2's %llmproxy-client at T1's node (idempotent)
   ui_post "$T2" \
     --data-urlencode "action=set-node" \
     --data-urlencode "node=$T1_SHIP"
@@ -160,7 +160,7 @@ reset_t1() {
   if curl -sS --max-time 5 "$T1/llmproxy/ui" | grep -q '>turn on hosting<'; then
     ui_post "$T1" --data-urlencode "action=toggle-hosting"
   fi
-  sleep 1   # let the queued shim → node pokes settle
+  sleep 1   # let the queued client → node pokes settle
 }
 
 # ─── test scenarios ────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ test_whitelist_allows_listed_ship() {
   ui_post "$T1" \
     --data-urlencode "action=set-policy-ships" \
     --data-urlencode "ships=$T2_SHIP"
-  sleep 2   # let the shim → node poke propagate
+  sleep 2   # let the client → node poke propagate
   unset BEARER
   local code
   code=$(chat_status "$T2")
