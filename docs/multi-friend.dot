@@ -1,0 +1,63 @@
+// One node, many friends. The publisher's GPU serves several
+// installed clients, each with their own OpenAI-compatible app.
+digraph multi_friend {
+  rankdir=LR;
+  bgcolor="white";
+  fontname="Helvetica";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled"];
+  edge [fontname="Helvetica", fontsize=10];
+
+  subgraph cluster_friend1 {
+    label="~friend-a";
+    fontname="Helvetica";
+    fontsize=11;
+    style="rounded,filled";
+    fillcolor="#f7f7f5";
+    color="#cccccc";
+    fa_app [label="Continue.dev", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fa_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
+    fa_app -> fa_shim [color="#4a7bb5"];
+  }
+
+  subgraph cluster_friend2 {
+    label="~friend-b";
+    fontname="Helvetica";
+    fontsize=11;
+    style="rounded,filled";
+    fillcolor="#f7f7f5";
+    color="#cccccc";
+    fb_app [label="OpenCode", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fb_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
+    fb_app -> fb_shim [color="#4a7bb5"];
+  }
+
+  subgraph cluster_friend3 {
+    label="~friend-c";
+    fontname="Helvetica";
+    fontsize=11;
+    style="rounded,filled";
+    fillcolor="#f7f7f5";
+    color="#cccccc";
+    fc_app [label="curl / shell", shape=ellipse, fillcolor="#e8f1fb", color="#4a7bb5"];
+    fc_shim [label="%llmproxy-shim", fillcolor="#fff7d8", color="#c9a000"];
+    fc_app -> fc_shim [color="#4a7bb5"];
+  }
+
+  subgraph cluster_publisher {
+    label="~publisher (GPU machine)";
+    fontname="Helvetica";
+    fontsize=12;
+    style="rounded,filled";
+    fillcolor="#f7f7f5";
+    color="#cccccc";
+    pub_node [label="%llmproxy-node", fillcolor="#fff7d8", color="#c9a000"];
+  }
+
+  ollama [label="Ollama / vLLM",
+          shape=cylinder, fillcolor="#fde8e8", color="#b54a4a"];
+
+  fa_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  fb_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  fc_shim -> pub_node [label="Ames", color="#3aa37a", penwidth=2];
+  pub_node -> ollama [label="HTTP via %iris", color="#b54a4a"];
+}

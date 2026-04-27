@@ -127,6 +127,12 @@ A publisher runs the GPU; a friend installs the desk and configures their shim's
 
 ![Two-ship deployment](docs/two-ship.svg)
 
+### One node, many friends
+
+The same node serves many installed clients in parallel. Each friend keeps their own shim, points it at the publisher, and uses whatever OpenAI-compat tool they want — none of them know about each other.
+
+![Multi-friend deployment](docs/multi-friend.svg)
+
 Source `.dot` files live in [`docs/`](./docs) — edit and re-render with `dot -Tsvg <file>.dot -o <file>.svg`.
 
 ## Access policy

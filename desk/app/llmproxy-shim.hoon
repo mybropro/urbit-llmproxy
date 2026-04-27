@@ -164,6 +164,14 @@
         summary \{color:#444;font-size:1.25em;font-weight:600;cursor:pointer;padding:.4em 0;border-bottom:1px solid #ececec;list-style-position:outside;user-select:none}
         summary:hover \{color:#3aa37a}
         details[open] > summary \{margin-bottom:.6em}
+        .topo \{display:flex;align-items:stretch;gap:.5em;padding:1em;background:#f0f6f3;border:1px solid #d8e8e0;border-radius:6px;margin:1em 0;font-size:.9em;flex-wrap:wrap}
+        .topo-box \{flex:1;min-width:8em;background:#fff;padding:.6em;border:1px solid #d8e8e0;border-radius:4px;text-align:center}
+        .topo-box.you \{border-color:#3aa37a;background:#f0fdf4}
+        .topo-box.backend \{border-color:#b54a4a;background:#fef2f2}
+        .topo-box small \{display:block;font-size:.78em;color:#666;margin-top:.2em;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+        .topo-box .role \{display:block;color:#888;font-size:.7em;text-transform:uppercase;letter-spacing:.05em;margin-top:.3em}
+        .topo-arrow \{display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3aa37a;font-size:1.5em;font-weight:bold;line-height:1}
+        .topo-arrow small \{display:block;text-align:center;font-size:.45em;color:#666;font-weight:normal;letter-spacing:.05em;margin-top:.3em}
         form \{background:#f7f7f5;padding:1em;border-radius:6px;margin:1em 0;border:1px solid #ececec}
         label \{display:block;margin:.5em 0 .2em;font-weight:600;font-size:.9em;color:#555}
         input[type=text],select,textarea \{width:100%;padding:.5em;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:.95em}
@@ -205,6 +213,36 @@
             ;dd:"{models-text}"
             ;dt: api token
             ;dd:"{?:(client-api-token-set "(set — clients must send Authorization: Bearer <token>)" "(none — endpoint is open to anyone who can reach the URL)")}"
+          ==
+          ;div(class "topo")
+            ;div(class "topo-box you")
+              ;b: this ship
+              ;br;
+              ;small:"{our-text}"
+              ;span(class "role"):"{?:(=(node our) "shim + node" "shim only")}"
+            ==
+            ;*  ?:  =(node our)  ~
+                :~  ;span(class "topo-arrow")
+                      ;span:"→"
+                      ;small: Ames
+                    ==
+                    ;div(class "topo-box")
+                      ;b: node
+                      ;br;
+                      ;small:"{ship-text}"
+                      ;span(class "role"): node + backend
+                    ==
+                ==
+            ;span(class "topo-arrow")
+              ;span:"→"
+              ;small: HTTP
+            ==
+            ;div(class "topo-box backend")
+              ;b: backend
+              ;br;
+              ;small: OpenAI-compatible
+              ;span(class "role"): inference server
+            ==
           ==
           ;p
             ;small: Example
