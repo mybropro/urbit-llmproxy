@@ -266,11 +266,17 @@
               ;span(class "role"): inference server
             ==
           ==
-          ;p
-            ;small: Example
-          ==
-          ;pre(id "curl-ex"):"{curl-example}"
-          ;button(type "button", onclick "navigator.clipboard.writeText(document.getElementById('curl-ex').textContent);this.textContent='copied!';"): copy
+          ;*  ?~  models
+                :~  ;p(class "msg")
+                      ;small: No models advertised yet. The node may not be reachable, or hosting is off.
+                    ==
+                ==
+              :~  ;p
+                    ;small: Example
+                  ==
+                  ;pre(id "curl-ex"):"{curl-example}"
+                  ;button(type "button", onclick "navigator.clipboard.writeText(document.getElementById('curl-ex').textContent);this.textContent='copied!';"): copy
+              ==
           ;form(method "post", action "/llmproxy/ui")
             ;input(type "hidden", name "action", value "set-node");
             ;label: route requests to this ship's %llmproxy-node
@@ -409,11 +415,18 @@
 ::
 ++  on-init
   ^-  (quip card _this)
+  =/  default-node=@p  (pub-of-llmproxy our.bowl now.bowl)
+  =/  bind-card=card
+    [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]
+  =/  watch-cards=(list card)
+    ?:  =(default-node our.bowl)  ~
+    :~  [%pass /models %agent [default-node %llmproxy-node] %watch /models]
+    ==
   :_  %=  this
           state
         :*  %0
             nonce=0
-            node=our.bowl
+            node=default-node
             models=~
             backend='http://localhost:11434/v1/chat/completions'
             backend-key=''
@@ -423,7 +436,7 @@
             pending=~
         ==
       ==
-  [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]~
+  [bind-card watch-cards]
 ::
 ++  on-save  !>(state)
 ::
