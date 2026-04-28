@@ -19,7 +19,14 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-WELCOME = "welcome to LLM hosting on urbit"
+WELCOME = (
+    "Hey — your ship just reached across the Urbit network and connected to "
+    "~datryn-ribdun, who then reached out to a locally hosted LLM (that "
+    "always returns this welcome message).\n\n"
+    "If you have any friends who self-host LLMs, this same setup can be used "
+    "to connect to theirs.\n\n"
+    "~sarlev/v3p046tv is a great group to chat about \"Sovereign Compute\" in."
+)
 MODEL_ID = "welcome-model"
 PORT = int(os.environ.get("PORT", "11434"))
 

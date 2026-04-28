@@ -1,10 +1,10 @@
 :~
   title+'llmproxy'
-  info+'OpenAI-compatible LLM proxy over Ames. Click to configure.'
+  info+'For hosting local LLMs and exposing them to other Urbiters. Or for connecting to someone else\'s LLM.'
   color+0x3a.a37a
   site+/llmproxy/ui
   base+'llmproxy'
-  version+[0 0 4]
+  version+[0 0 5]
   license+'MIT'
   website+'https://github.com/mybropro/urbit-llmproxy'
 ==

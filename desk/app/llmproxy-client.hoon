@@ -171,7 +171,7 @@
         summary:hover \{color:#3aa37a}
         details[open] > summary \{margin-bottom:.6em}
         .topo \{display:flex;align-items:stretch;gap:.5em;padding:1em;background:#f0f6f3;border:1px solid #d8e8e0;border-radius:6px;margin:1em 0;font-size:.9em;flex-wrap:wrap}
-        .topo-box \{flex:1;min-width:8em;background:#fff;padding:.6em;border:1px solid #d8e8e0;border-radius:4px;text-align:center}
+        .topo-box \{flex:1 1 6em;min-width:6em;background:#fff;padding:.6em;border:1px solid #d8e8e0;border-radius:4px;text-align:center}
         .topo-box.you \{border-color:#3aa37a;background:#f0fdf4}
         .topo-box.backend \{border-color:#b54a4a;background:#fef2f2}
         .topo-box.client \{border-color:#4a7bb5;background:#e8f1fb}
