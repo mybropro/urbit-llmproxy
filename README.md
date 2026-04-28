@@ -85,19 +85,30 @@ curl -N -X POST http://localhost:80/llmproxy/v1/chat/completions \
   }'
 ```
 
-### Continue.dev
+### OpenCode
+
+In `~/.config/opencode/opencode.json` (or `opencode.json` at your project root):
 
 ```jsonc
 {
-  "models": [{
-    "title": "llama via Urbit",
-    "provider": "openai",
-    "model": "llama3.1:8b",
-    "apiBase": "http://localhost:80/llmproxy",
-    "apiKey": "sk-your-token"
-  }]
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "llmproxy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llmproxy via Urbit",
+      "options": {
+        "baseURL": "http://localhost:80/llmproxy/v1",
+        "apiKey": "sk-your-token"
+      },
+      "models": {
+        "llama3.1:8b": {}
+      }
+    }
+  }
 }
 ```
+
+Then `opencode` and pick the `llmproxy/llama3.1:8b` model.
 
 ### Endpoints
 
