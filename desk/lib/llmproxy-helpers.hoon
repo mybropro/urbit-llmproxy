@@ -120,19 +120,19 @@
 ::                                                  ::
 ::::                  api base / inbound request    ::
 ::                                                  ::
-::  Derive the public-facing base URL ("http(s)://host/llmproxy") from
-::  the inbound request's Host header and `secure` flag.
+::  Derive a placeholder base URL for the UI's curl example. The browser
+::  rewrites this to window.location.origin via inline JS on page load,
+::  so the server-side guess only needs to be a syntactically-valid URL
+::  for graceful no-JS degradation; getting scheme/host exactly right
+::  here is no longer worth the proxy-header gymnastics.
 ++  derive-api-base
   |=  =inbound-request:eyre
   ^-  @t
   =/  hosts
     %+  skim  header-list.request.inbound-request
-    |=  [k=@t v=@t]
-    =((cass (trip k)) "host")
-  =/  host=@t
-    ?~(hosts 'localhost' value.i.hosts)
-  =/  scheme=@t
-    ?:(secure.inbound-request 'https://' 'http://')
+    |=  [k=@t v=@t]  =((cass (trip k)) "host")
+  =/  host=@t  ?~(hosts 'localhost' value.i.hosts)
+  =/  scheme=@t  ?:(secure.inbound-request 'https://' 'http://')
   (rap 3 ~[scheme host '/llmproxy'])
 ::                                                  ::
 ::::                  url-encoded forms             ::

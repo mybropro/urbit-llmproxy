@@ -54,7 +54,9 @@
   ^-  (quip card _this)
   =/  default-backend=@t  'http://localhost:11434/v1/chat/completions'
   :_  this(state [%0 default-backend '' [%whitelist ~] ~ ~])
-  [(refresh-models-card default-backend '')]~
+  :~  (refresh-models-card default-backend '')
+      [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]
+  ==
 ::
 ++  on-save  !>(state)
 ::
@@ -65,7 +67,11 @@
   ?~  loaded
     ~&  >>  %llmproxy-node-reset-state
     on-init
-  `this(state u.loaded)
+  ::  Re-arm the auto-refresh timer on every reload. Existing in-flight
+  ::  timers from prior revisions still fire on this same wire; on-arvo
+  ::  handles those harmlessly (refresh + reschedule).
+  :_  this(state u.loaded)
+  [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]~
 ::
 ++  on-poke
   |=  [=mark =vase]
@@ -161,6 +167,15 @@
       :_  this(pending (~(del by pending) n))
       :~  [%give %fact ~[pat] %llmproxy-token !>(tc)]
           [%give %kick ~[pat] ~]
+      ==
+    ==
+  ::
+      [%refresh-tick ~]
+    ?+  +<.sign-arvo  (on-arvo:def wire sign-arvo)
+        %wake
+      :_  this
+      :~  (refresh-models-card backend-url backend-key)
+          [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]
       ==
     ==
   ==

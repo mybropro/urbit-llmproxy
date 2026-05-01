@@ -213,7 +213,7 @@
             ==
           ;dl
             ;dt: api endpoint
-            ;dd:"POST {api-base-text}/v1/chat/completions"
+            ;dd(class "api-base"):"POST {api-base-text}/v1/chat/completions"
             ;dt: node
             ;dd:"{ship-text}"
             ;dt: models
@@ -274,7 +274,7 @@
               :~  ;p
                     ;small: Example
                   ==
-                  ;pre(id "curl-ex"):"{curl-example}"
+                  ;pre(id "curl-ex", class "api-base"):"{curl-example}"
                   ;button(type "button", onclick "navigator.clipboard.writeText(document.getElementById('curl-ex').textContent);this.textContent='copied!';"): copy
               ==
           ;form(method "post", action "/llmproxy/ui")
@@ -396,6 +396,7 @@
           ;p
             ;small: %llmproxy-client
           ==
+          ;script:"(function()\{var loc=window.location.origin;var re=/https?:\\/\\/[^\\/'\"]+/g;document.querySelectorAll('.api-base').forEach(function(el)\{el.textContent=el.textContent.replace(re,loc);});})();"
         ==
       ==
     ::
