@@ -81,6 +81,7 @@
     =/  cmd
       !<  $%  [%set-backend url=@t]
               [%set-backend-key key=@t]
+              [%set-backend-and-key url=@t key=@t]
               [%set-policy =access-policy:llmproxy]
               [%refresh-models ~]
           ==
@@ -93,6 +94,13 @@
         %set-backend-key
       :_  this(backend-key key.cmd)
       [(refresh-models-card backend-url key.cmd)]~
+    ::
+    ::  Atomic update — both fields together, single refresh. The client's
+    ::  merged "update backend" form uses this so it can defer its HTTP
+    ::  response on a single /models fact rather than race two refreshes.
+        %set-backend-and-key
+      :_  this(backend-url url.cmd, backend-key key.cmd)
+      [(refresh-models-card url.cmd key.cmd)]~
     ::
         %set-policy  `this(policy access-policy.cmd)
     ::

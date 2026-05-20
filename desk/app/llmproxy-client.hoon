@@ -37,6 +37,12 @@
       policy=access-policy:llmproxy
       hosting=?
       pending=(map @ud pending-client)
+      ::  HTTP form-submit eyre-ids parked here waiting for a /models fact
+      ::  after a backend/key change. Drained in on-agent when the fact
+      ::  arrives; drained in on-arvo /config-timeout when behn fires first.
+      ::  api-base captured at submit time so the deferred response can
+      ::  render the same external URL the user originally hit.
+      pending-config=(map @ud [eyre-id=@ta api-base=@t])
   ==
 --
 ::
@@ -340,18 +346,21 @@
                   ;dd:"{?:(backend-key-set "(set)" "(none)")}"
                 ==
                 ;form(method "post", action "/llmproxy/ui")
-                  ;input(type "hidden", name "action", value "set-backend");
+                  ;input(type "hidden", name "action", value "set-backend-and-key");
                   ;label: where your local OpenAI-compatible inference server lives
                   ;br;
                   ;input(type "text", name "backend", value "{backend-text}", placeholder "http://localhost:11434/v1/chat/completions", size "60");
-                  ;button(type "submit"): update backend
-                ==
-                ;form(method "post", action "/llmproxy/ui")
-                  ;input(type "hidden", name "action", value "set-backend-key");
-                  ;label: api key to send to your local OpenAI-compatible server (leave empty to remove)
+                  ;br;
+                  ;label: api key to send to your local OpenAI-compatible server (leave empty to keep current)
                   ;br;
                   ;input(type "password", name "key", placeholder "sk-...", size "60");
-                  ;button(type "submit"): update api key
+                  ;br;
+                  ;label
+                    ;input(type "checkbox", name "clear-key", value "1");
+                    ;span: remove existing api key
+                  ==
+                  ;br;
+                  ;button(type "submit"): update backend
                 ==
                 ;form(method "post", action "/llmproxy/ui")
                   ;input(type "hidden", name "action", value "refresh-models");
@@ -419,8 +428,13 @@
   =/  default-node=@p  (pub-of-llmproxy our.bowl now.bowl)
   =/  bind-card=card
     [%pass /bind %arvo %e %connect [~ /llmproxy] dap.bowl]
+  ::  Subscribe to default-node's /models. When default-node is our own
+  ::  ship (the common single-ship setup), this also gives the host UI's
+  ::  deferred-refresh response a signal to fire on. In a cross-ship setup
+  ::  where the inference target is someone else's ship, the host UI's
+  ::  deferred refresh has no local subscription to ride on and will fall
+  ::  back to its timeout — a known caveat.
   =/  watch-cards=(list card)
-    ?:  =(default-node our.bowl)  ~
     :~  [%pass /models %agent [default-node %llmproxy-node] %watch /models]
     ==
   :_  %=  this
@@ -435,6 +449,7 @@
             policy=`access-policy:llmproxy`[%whitelist ~]
             hosting=%.n
             pending=~
+            pending-config=~
         ==
       ==
   [bind-card watch-cards]
@@ -557,16 +572,6 @@
         :_  this(client-api-token tok)
         %+  give-simple-payload:app:server  eyre-id
         (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' tok) policy.state hosting.state ?:(=('' tok) 'api token disabled' 'api token set') '' ''))
-      ?:  ?&  ?=(^ act)  =('set-backend-key' u.act)  ==
-        =/  raw  (~(get by fields) 'key')
-        =/  key=@t  ?~(raw '' u.raw)
-        =/  poke-card=card
-          [%pass /set-backend-key %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend-key key])]
-        =/  http-cards
-          %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' key) !=('' client-api-token.state) policy.state hosting.state ?:(=('' key) 'api key removed' 'api key updated') '' ''))
-        :_  this(backend-key key)
-        [poke-card http-cards]
       ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
           [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
@@ -575,19 +580,43 @@
           (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
-      ?:  ?&  ?=(^ act)  =('set-backend' u.act)  ==
-        =/  raw  (~(get by fields) 'backend')
-        ?:  |(?=(~ raw) =('' u.raw))
+      ::  Merged backend + api key form. Backend URL is required and always
+      ::  updated. The api key field is tri-state: leaving it blank keeps
+      ::  the current value; typing a new value replaces it; ticking
+      ::  `clear-key` removes the existing key (and beats out any value
+      ::  typed in the field, so an accidental keystroke doesn't override
+      ::  the explicit "remove" intent).
+      ::
+      ::  Response is deferred: we poke the node (single atomic
+      ::  set-backend-and-key, triggers one /v1/models fetch) and stash the
+      ::  eyre-id in pending-config. on-agent fires the response when the
+      ::  /models fact arrives; on-arvo /config-timeout fires it if behn
+      ::  beats the fetch (10s grace, suggests the user reload).
+      ?:  ?&  ?=(^ act)  =('set-backend-and-key' u.act)  ==
+        =/  raw-backend  (~(get by fields) 'backend')
+        ?:  |(?=(~ raw-backend) =('' u.raw-backend))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
           (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'missing backend url' '' ''))
+        =/  new-backend=@t  u.raw-backend
+        =/  raw-key  (~(get by fields) 'key')
+        =/  typed-key=@t  ?~(raw-key '' u.raw-key)
+        =/  clear-key=?  ?=(^ (~(get by fields) 'clear-key'))
+        =/  change-key=?  |(clear-key !=('' typed-key))
+        =/  new-key=@t  ?:(clear-key '' typed-key)
+        =/  effective-key=@t  ?:(change-key new-key backend-key.state)
+        =/  n=@ud  +(nonce.state)
         =/  poke-card=card
-          [%pass /set-backend %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend u.raw])]
-        =/  http-cards
-          %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state u.raw !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'backend updated' '' ''))
-        :_  this(backend u.raw)
-        [poke-card http-cards]
+          [%pass /set-backend-and-key %agent [our.bowl %llmproxy-node] %poke %noun !>([%set-backend-and-key new-backend effective-key])]
+        =/  timeout-card=card
+          [%pass /config-timeout/(scot %ud n) %arvo %b %wait (add now.bowl ~s10)]
+        :_  %=  this
+                nonce           n
+                backend         new-backend
+                backend-key     effective-key
+                pending-config  (~(put by pending-config.state) n [eyre-id api-base])
+            ==
+        ~[poke-card timeout-card]
       ?:  ?&  ?=(^ act)  =('toggle-hosting' u.act)  ==
         =/  new-hosting=?  !hosting.state
         :_  this(hosting new-hosting)
@@ -732,7 +761,20 @@
       ?+  p.cage.sign  `this
           %llmproxy-models
         =/  ms  !<((list @t) q.cage.sign)
-        `this(models ms)
+        ?:  =(~ pending-config.state)
+          `this(models ms)
+        ::  Deferred-form responses parked in pending-config get rendered
+        ::  now with this fresh list. We don't try to filter by "fact in
+        ::  response to my refresh vs. unrelated" — any fresh /models fact
+        ::  reflects the latest node state, which is what the user wanted.
+        =/  http-cards=(list card)
+          %-  zing
+          %+  turn  ~(tap by pending-config.state)
+          |=  [n=@ud entry=[eyre-id=@ta api-base=@t]]
+          %+  give-simple-payload:app:server  eyre-id.entry
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.entry node.state ms backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'backend updated and models refreshed' '' ''))
+        :_  this(models ms, pending-config ~)
+        http-cards
       ==
     ==
   ::
@@ -822,6 +864,18 @@
   ?:  ?=([%bind ~] wire)
     ?>  ?=([%eyre %bound *] sign-arvo)
     `this
+  ::  Deferred set-backend-and-key responses get parked in pending-config
+  ::  with a 10s behn fallback. If the fact races us, the entry is already
+  ::  gone and this is a no-op; otherwise honestly tell the user the
+  ::  refresh hasn't landed yet and let them reload to check.
+  ?:  ?=([%config-timeout @ ~] wire)
+    ?>  ?=([%behn %wake *] sign-arvo)
+    =/  n=@ud  (slav %ud i.t.wire)
+    =/  entry  (~(get by pending-config.state) n)
+    ?~  entry  `this
+    :_  this(pending-config (~(del by pending-config.state) n))
+    %+  give-simple-payload:app:server  eyre-id.u.entry
+    (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.u.entry node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'backend updated; model refresh still pending, reload to check' '' ''))
   (on-arvo:def wire sign-arvo)
 ::
 ++  on-leave  on-leave:def
