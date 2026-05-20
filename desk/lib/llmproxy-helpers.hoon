@@ -152,6 +152,10 @@
 ::                                                  ::
 ::  Parse incoming OpenAI chat-completion request body. Returns ~ if
 ::  the body is malformed or missing required fields.
+::
+::  `prompt` carries the full `messages` array re-serialized as JSON so
+::  the backend sees the whole conversation, not just the latest user
+::  turn. The wire field is named `prompt` for historical reasons.
 ++  parse-openai-request
   |=  body=@t
   ^-  (unit [model=@t prompt=@t stream=?])
@@ -165,16 +169,11 @@
   ?~  msgs  ~
   ?.  ?=([%a *] u.msgs)  ~
   ?~  p.u.msgs  ~
-  =/  last=json  (rear p.u.msgs)
-  ?.  ?=([%o *] last)  ~
-  =/  c=(unit json)  (~(get by p.last) 'content')
-  ?~  c  ~
-  ?.  ?=([%s *] u.c)  ~
   =/  stream=?
     =/  s=(unit json)  (~(get by p.u.jon) 'stream')
     ?~  s  %.n
     ?.(?=([%b *] u.s) %.n p.u.s)
-  `[p.u.m p.u.c stream]
+  `[p.u.m (en:json:html u.msgs) stream]
 ::                                                  ::
 ::::                  backend / models discovery    ::
 ::                                                  ::
@@ -237,23 +236,39 @@
 ::::                  http body builders            ::
 ::                                                  ::
 ::  Build the JSON body for a (non-streaming) chat-completions request
-::  to the backend.
+::  to the backend. `prompt` is a pre-serialized JSON `messages` array
+::  (see parse-openai-request and wrap-user-prompt); we parse it back
+::  to a json value so we can rebuild the outgoing body with proper
+::  escaping. If the cord doesn't parse as a JSON array, fall back to
+::  an empty messages list rather than 500ing.
 ++  build-body
   |=  [model=@t prompt=@t]
   ^-  @t
+  =/  parsed=(unit json)  (de:json:html prompt)
+  =/  msgs=json
+    ?~  parsed  a+~
+    ?.(?=([%a *] u.parsed) a+~ u.parsed)
   =/  jon=json
     %-  pairs:enjs:format
     :~  ['model'^s+model]
         ['stream'^b+%.n]
-        :-  'messages'
-        :-  %a
-        :~  %-  pairs:enjs:format
-            :~  ['role'^s+'user']
-                ['content'^s+prompt]
-            ==
-        ==
+        ['messages'^msgs]
     ==
   (en:json:html jon)
+::
+::  Wrap a single user-prompt string into a JSON messages-array cord, so
+::  the dojo `[%ask ...]` helper and the UI test form can share the same
+::  wire format as a real OpenAI chat request (which carries the whole
+::  conversation, not just one turn).
+++  wrap-user-prompt
+  |=  prompt=@t
+  ^-  @t
+  =/  msg=json
+    %-  pairs:enjs:format
+    :~  ['role'^s+'user']
+        ['content'^s+prompt]
+    ==
+  (en:json:html a+~[msg])
 ::
 ::  Build header-list with optional Authorization Bearer.
 ++  build-headers

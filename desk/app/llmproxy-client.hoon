@@ -483,7 +483,7 @@
         %ask
       =/  n=@ud  +(nonce.state)
       =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
-      =/  jr=job-req:llmproxy  [jid model.cmd prompt.cmd]
+      =/  jr=job-req:llmproxy  [jid model.cmd (wrap-user-prompt prompt.cmd)]
       =/  pat=path  /job/(scot %ud n)
       =/  rec=pending-client
         [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='']
@@ -674,7 +674,7 @@
           u.model-raw
         =/  n=@ud  +(nonce.state)
         =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
-        =/  jr=job-req:llmproxy  [jid model u.prompt-raw]
+        =/  jr=job-req:llmproxy  [jid model (wrap-user-prompt u.prompt-raw)]
         =/  pat=path  /job/(scot %ud n)
         :_  %=  this
                 nonce    n
