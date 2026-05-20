@@ -318,6 +318,97 @@
   =/  delta-body=@t  (en:json:html delta-jon)
   (rap 3 ~['data: ' delta-body '\0a\0a' 'data: [DONE]\0a\0a'])
 ::
+::                                                  ::
+::::                  telemetry formatting           ::
+::                                                  ::
+::  Telemetry helpers exist to keep the agent files focused on flow
+::  control. The push pattern is just `(scag cap [new old])` and is
+::  inlined at call sites — no helper needed. What lives here are the
+::  pure formatters the UI uses to render entries.
+::
+::  Render an @ud byte count as a short cord: '512B', '4.2K', '1.7M'.
+::  Cutoff: below 1024 use B; below ~1MB use K with one decimal; else M.
+++  format-bytes
+  |=  n=@ud
+  ^-  @t
+  ?:  (lth n 1.024)
+    (cat 3 (scot %ud n) 'B')
+  ?:  (lth n 1.048.576)
+    =/  kb-times-10  (div (mul n 10) 1.024)
+    =/  whole  (div kb-times-10 10)
+    =/  frac   (mod kb-times-10 10)
+    (rap 3 ~[(scot %ud whole) '.' (scot %ud frac) 'K'])
+  =/  mb-times-10  (div (mul n 10) 1.048.576)
+  =/  whole  (div mb-times-10 10)
+  =/  frac   (mod mb-times-10 10)
+  (rap 3 ~[(scot %ud whole) '.' (scot %ud frac) 'M'])
+::
+::  Render an @ud millisecond count as a short cord: '143ms', '1.4s'.
+++  format-ms
+  |=  ms=@ud
+  ^-  @t
+  ?:  (lth ms 1.000)
+    (cat 3 (scot %ud ms) 'ms')
+  =/  s-times-10  (div ms 100)
+  =/  whole  (div s-times-10 10)
+  =/  frac   (mod s-times-10 10)
+  (rap 3 ~[(scot %ud whole) '.' (scot %ud frac) 's'])
+::
+::  Render the age of `then` relative to `now` as 'now' / 'Ns' / 'Nm'
+::  / 'Nh' / 'Nd'. Coarse on purpose — telemetry display, not a
+::  stopwatch. `then` newer than `now` (clock skew, replays) renders
+::  as 'now'.
+++  format-age
+  |=  [now=@da then=@da]
+  ^-  @t
+  ?:  (gth then now)  'now'
+  =/  diff  (sub now then)
+  ?:  (lth diff ~s1)  'now'
+  ?:  (lth diff ~m1)  (cat 3 (scot %ud (div diff ~s1)) 's')
+  ?:  (lth diff ~h1)  (cat 3 (scot %ud (div diff ~m1)) 'm')
+  ?:  (lth diff ~d1)  (cat 3 (scot %ud (div diff ~h1)) 'h')
+  (cat 3 (scot %ud (div diff ~d1)) 'd')
+::
+::  Compute milliseconds elapsed between two @da timestamps. Returns 0
+::  if `started` is in the future (clock skew).
+++  elapsed-ms
+  |=  [now=@da started=@da]
+  ^-  @ud
+  ?:  (gth started now)  0
+  (div (sub now started) (div ~s1 1.000))
+::
+::  Human-readable label for a node telemetry status.
+++  node-status-text
+  |=  s=?(%ok %backend-error %no-response)
+  ^-  @t
+  ?-  s
+      %ok             'ok'
+      %backend-error  'backend error'
+      %no-response    'no response'
+  ==
+::
+::  Human-readable label for a client telemetry status.
+++  client-status-text
+  |=  s=?(%ok %unauthorized %bad-request %node-rejected %node-unreachable)
+  ^-  @t
+  ?-  s
+      %ok                'ok'
+      %unauthorized      'unauthorized'
+      %bad-request       'bad request'
+      %node-rejected     'node rejected'
+      %node-unreachable  'node unreachable'
+  ==
+::
+::  Human-readable label for the client `authed` field.
+++  authed-text
+  |=  a=?(%ok %none %fail)
+  ^-  @t
+  ?-  a
+      %ok    'token ok'
+      %none  'no auth'
+      %fail  'token fail'
+  ==
+::
 ::  Build OpenAI-format /v1/models response.
 ++  build-models-response
   |=  models=(list @t)

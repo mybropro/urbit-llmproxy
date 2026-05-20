@@ -13,18 +13,34 @@
   $:  src=@p
       model=@t
       jid=job-id:llmproxy
+      started=@da
+      req-bytes=@ud
   ==
+::  Older pending-job, kept for state-0 deserialization in on-load.
++$  pending-job-0  [src=@p model=@t jid=job-id:llmproxy]
 +$  state-0
   $:  %0
       backend-url=@t
       backend-key=@t
       policy=access-policy:llmproxy
       advertised=(list @t)
-      pending=(map @ud pending-job)
+      pending=(map @ud pending-job-0)
   ==
++$  state-1
+  $:  %1
+      backend-url=@t
+      backend-key=@t
+      policy=access-policy:llmproxy
+      advertised=(list @t)
+      pending=(map @ud pending-job)
+      telemetry=(list node-telemetry-entry:llmproxy)
+  ==
++$  versioned-state  $%(state-0 state-1)
+::  Cap on the in-state telemetry ring buffer.
+++  telemetry-cap  20
 --
 ::
-=|  state-0
+=|  state-1
 =*  state  -
 ::
 =>  |%
@@ -53,7 +69,7 @@
 ++  on-init
   ^-  (quip card _this)
   =/  default-backend=@t  'http://localhost:11434/v1/chat/completions'
-  :_  this(state [%0 default-backend '' [%whitelist ~] ~ ~])
+  :_  this(state [%1 default-backend '' [%whitelist ~] ~ ~ ~])
   :~  (refresh-models-card default-backend '')
       [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]
   ==
@@ -63,14 +79,31 @@
 ++  on-load
   |=  =vase
   ^-  (quip card _this)
-  =/  loaded  (mole |.(!<(state-0 vase)))
+  =/  loaded  (mole |.(!<(versioned-state vase)))
   ?~  loaded
     ~&  >>  %llmproxy-node-reset-state
     on-init
   ::  Re-arm the auto-refresh timer on every reload. Existing in-flight
   ::  timers from prior revisions still fire on this same wire; on-arvo
   ::  handles those harmlessly (refresh + reschedule).
-  :_  this(state u.loaded)
+  =/  migrated=state-1
+    ?-  -.u.loaded
+        %1  u.loaded
+    ::
+    ::  state-0 → state-1: drop any in-flight pending jobs (their old
+    ::  shape lacks started/req-bytes, and we'd have no clean way to
+    ::  reconstruct latency or sizes for them anyway), init telemetry.
+        %0
+      :*  %1
+          backend-url.u.loaded
+          backend-key.u.loaded
+          policy.u.loaded
+          advertised.u.loaded
+          *(map @ud pending-job)
+          *(list node-telemetry-entry:llmproxy)
+      ==
+    ==
+  :_  this(state migrated)
   [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]~
 ::
 ++  on-poke
@@ -123,7 +156,7 @@
       ==
     =/  n=@ud  nonce.id.jr
     =/  wir=wire  /req/(scot %ud n)
-    =/  rec=pending-job  [src.bowl model.jr id.jr]
+    =/  rec=pending-job  [src.bowl model.jr id.jr now.bowl (met 3 body)]
     :_  this(pending (~(put by pending) n rec))
     [%pass wir %arvo %i %request request *outbound-config:iris]~
   ==
@@ -169,9 +202,25 @@
       =/  body-text=@t
         ?~  r.rep  ''
         q.u.r.rep
+      =/  http-code=@ud  p.rep
+      =/  ok=?  &((gte http-code 200) (lth http-code 300))
+      =/  entry=node-telemetry-entry:llmproxy
+        :*  now.bowl
+            src.u.rec
+            n
+            model.u.rec
+            ?:(ok %ok %backend-error)
+            http-code
+            (elapsed-ms now.bowl started.u.rec)
+            req-bytes.u.rec
+            (met 3 body-text)
+        ==
       =/  pat=path  /job/(scot %ud n)
       =/  tc=token-chunk:llmproxy  [jid.u.rec 0 body-text &]
-      :_  this(pending (~(del by pending) n))
+      :_  %=  this
+              pending    (~(del by pending) n)
+              telemetry  (scag telemetry-cap [entry telemetry])
+          ==
       :~  [%give %fact ~[pat] %llmproxy-token !>(tc)]
           [%give %kick ~[pat] ~]
       ==
@@ -196,6 +245,7 @@
       [%x %policy ~]        ``noun+!>(policy)
       [%x %backend ~]       ``noun+!>(backend-url)
       [%x %backend-key ~]   ``noun+!>(backend-key)
+      [%x %telemetry ~]     ``noun+!>(telemetry)
   ==
 ++  on-agent  on-agent:def
 ++  on-fail   on-fail:def
