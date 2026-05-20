@@ -190,10 +190,16 @@
   =/  body  '{"model":"llama3.1:8b","messages":[{"role":"user","content":"hi"}]}'
   =/  parsed  (parse-openai-request:lph body)
   ?~  parsed  ['expected parsed result, got ~']~
+  ::  prompt is the re-serialized messages JSON; round-trip to avoid
+  ::  pinning the encoder's key order.
+  =/  reparsed=(unit json)  (de:json:html prompt.u.parsed)
+  ?~  reparsed  ['expected re-parseable JSON in prompt']~
   ;:  weld
     %+  expect-eq  !>('llama3.1:8b')  !>(model.u.parsed)
-    %+  expect-eq  !>('hi')           !>(prompt.u.parsed)
     %+  expect-eq  !>(%.n)            !>(stream.u.parsed)
+    %+  expect-eq
+      !>(`json`a+~[(pairs:enjs:format ~[['role'^s+'user'] ['content'^s+'hi']])])
+      !>(u.reparsed)
   ==
 ::
 ++  test-parse-openai-request-stream-true
@@ -203,14 +209,22 @@
   ?~  parsed  ['expected parsed result, got ~']~
   %+  expect-eq  !>(%.y)  !>(stream.u.parsed)
 ::
-++  test-parse-openai-request-takes-last-message
+::  Multi-turn conversations must survive parse: the whole messages array
+::  is re-serialized into `prompt`, not just the last user message.
+::  Regression for the proxy-collapses-history bug.
+++  test-parse-openai-request-preserves-history
   ^-  tang
-  ::  multi-turn conversation: prompt is last user message
   =/  body
     '{"model":"m","messages":[{"role":"user","content":"first"},{"role":"assistant","content":"reply"},{"role":"user","content":"second"}]}'
   =/  parsed  (parse-openai-request:lph body)
   ?~  parsed  ['expected parsed result, got ~']~
-  %+  expect-eq  !>('second')  !>(prompt.u.parsed)
+  ::  Round-trip the serialized cord back through the JSON parser and check
+  ::  it's a 3-element array — string-comparison is fragile against key
+  ::  ordering in the encoder.
+  =/  reparsed=(unit json)  (de:json:html prompt.u.parsed)
+  ?~  reparsed  ['expected re-parseable JSON in prompt']~
+  ?.  ?=([%a *] u.reparsed)  ['expected JSON array in prompt']~
+  %+  expect-eq  !>(3)  !>((lent p.u.reparsed))
 ::
 ++  test-parse-openai-request-malformed
   ^-  tang
