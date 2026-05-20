@@ -329,4 +329,74 @@
     %+  expect-eq  !>('Bearer sk-test')  !>(value.i.hdrs)
     %+  expect-eq  !>('authorization')   !>(key.i.hdrs)
   ==
+::                                                  ::
+::::                  telemetry formatters          ::
+::                                                  ::
+++  test-format-bytes
+  ^-  tang
+  ;:  weld
+    %+  expect-eq  !>('0B')      !>((format-bytes:lph 0))
+    %+  expect-eq  !>('1B')      !>((format-bytes:lph 1))
+    %+  expect-eq  !>('1.023B')  !>((format-bytes:lph 1.023))
+    %+  expect-eq  !>('1.0K')    !>((format-bytes:lph 1.024))
+    %+  expect-eq  !>('1.5K')    !>((format-bytes:lph 1.536))
+    %+  expect-eq  !>('1.0M')    !>((format-bytes:lph 1.048.576))
+    %+  expect-eq  !>('2.0M')    !>((format-bytes:lph 2.097.152))
+    %+  expect-eq  !>('5.0M')    !>((format-bytes:lph 5.242.880))
+  ==
+::
+++  test-format-ms
+  ^-  tang
+  ;:  weld
+    %+  expect-eq  !>('0ms')     !>((format-ms:lph 0))
+    %+  expect-eq  !>('143ms')   !>((format-ms:lph 143))
+    %+  expect-eq  !>('999ms')   !>((format-ms:lph 999))
+    %+  expect-eq  !>('1.0s')    !>((format-ms:lph 1.000))
+    %+  expect-eq  !>('1.4s')    !>((format-ms:lph 1.420))
+    %+  expect-eq  !>('60.1s')   !>((format-ms:lph 60.123))
+  ==
+::
+++  test-format-age
+  ^-  tang
+  =/  now  ~2026.5.20
+  ;:  weld
+    ::  identical times → 'now'
+    %+  expect-eq  !>('now')  !>((format-age:lph now now))
+    ::  future then → 'now' (clock skew safety)
+    %+  expect-eq  !>('now')  !>((format-age:lph now (add now ~s5)))
+    ::  seconds
+    %+  expect-eq  !>('5s')   !>((format-age:lph now (sub now ~s5)))
+    ::  minutes
+    %+  expect-eq  !>('3m')   !>((format-age:lph now (sub now ~m3)))
+    ::  hours
+    %+  expect-eq  !>('2h')   !>((format-age:lph now (sub now ~h2)))
+    ::  days
+    %+  expect-eq  !>('4d')   !>((format-age:lph now (sub now ~d4)))
+  ==
+::
+++  test-elapsed-ms
+  ^-  tang
+  =/  start  ~2026.5.20
+  =/  one-ms  (div ~s1 1.000)
+  ;:  weld
+    %+  expect-eq  !>(0)      !>((elapsed-ms:lph start start))
+    ::  future-started → 0
+    %+  expect-eq  !>(0)      !>((elapsed-ms:lph start (add start ~s1)))
+    %+  expect-eq  !>(143)    !>((elapsed-ms:lph (add start (mul one-ms 143)) start))
+    %+  expect-eq  !>(1.000)  !>((elapsed-ms:lph (add start ~s1) start))
+  ==
+::
+++  test-status-text
+  ^-  tang
+  ;:  weld
+    %+  expect-eq  !>('ok')             !>((node-status-text:lph %ok))
+    %+  expect-eq  !>('backend error')  !>((node-status-text:lph %backend-error))
+    %+  expect-eq  !>('no response')    !>((node-status-text:lph %no-response))
+    %+  expect-eq  !>('ok')             !>((client-status-text:lph %ok))
+    %+  expect-eq  !>('unauthorized')   !>((client-status-text:lph %unauthorized))
+    %+  expect-eq  !>('node rejected')  !>((client-status-text:lph %node-rejected))
+    %+  expect-eq  !>('token ok')       !>((authed-text:lph %ok))
+    %+  expect-eq  !>('no auth')        !>((authed-text:lph %none))
+    %+  expect-eq  !>('token fail')     !>((authed-text:lph %fail))
+  ==
 --

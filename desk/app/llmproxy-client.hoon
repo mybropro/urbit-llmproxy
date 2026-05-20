@@ -28,9 +28,36 @@
       ::  caller's request id, set only for kind=%agent (the /ask-result/[id]
       ::  path we answer on); '' for the http/test/dojo paths.
       ask-id=@ta
+      ::  wall-clock submit time, for telemetry latency. (added in state-1)
+      started=@da
+  ==
+::  Older pending-client shape (pre-telemetry), kept for state-0
+::  deserialization — matches main's shipped state-0 pending-client exactly.
++$  pending-client-0
+  $:  eyre-id=@ta
+      target=@p
+      model=@t
+      stream=?
+      kind=?(%openai %test %dojo %agent)
+      prompt=@t
+      api-base=@t
+      ask-id=@ta
   ==
 +$  state-0
   $:  %0
+      nonce=@ud
+      node=@p
+      models=(list @t)
+      backend=@t
+      backend-key=@t
+      client-api-token=@t
+      policy=access-policy:llmproxy
+      hosting=?
+      pending=(map @ud pending-client-0)
+      pending-config=(map @ud [eyre-id=@ta api-base=@t])
+  ==
++$  state-1
+  $:  %1
       nonce=@ud
       node=@p
       models=(list @t)
@@ -46,16 +73,20 @@
       ::  api-base captured at submit time so the deferred response can
       ::  render the same external URL the user originally hit.
       pending-config=(map @ud [eyre-id=@ta api-base=@t])
+      ::  Last N HTTP requests received on /llmproxy/v1/*, newest-first.
+      ::  Surfaced in the UI and via scry for debugging.
+      telemetry=(list client-telemetry-entry:llmproxy)
   ==
 ::  Union of every state shape this agent has ever shipped. on-load casts
 ::  the persisted state to this and migrates forward to the current shape.
 ::  RULE: once a version ships, freeze its +$; any shape change adds a new
 ::  +$ state-N (with a fresh %N tag) and a migration arm in on-load. Never
 ::  reshape a tagged version in place — that breaks the cast on upgrade.
-+$  versioned-state  $%(state-0)
++$  versioned-state  $%(state-0 state-1)
+++  telemetry-cap  20
 --
 ::
-=|  state-0
+=|  state-1
 =*  state  -
 ::
 =>  |%
@@ -97,6 +128,21 @@
       ?~  sync.u.pike  our
       ship.u.sync.u.pike
     ::
+    ::  Scry the local llmproxy-node for its telemetry buffer. Returns
+    ::  empty when hosting is off (the node may not be useful state) or
+    ::  on scry failure (cold start, agent not yet booted).
+    ++  scry-node-telemetry
+      |=  [our=@p now=@da hosting=?]
+      ^-  (list node-telemetry-entry:llmproxy)
+      ?.  hosting  ~
+      =/  scried=(unit (list node-telemetry-entry:llmproxy))
+        %-  mole
+        |.
+        .^  (list node-telemetry-entry:llmproxy)  %gx
+            /(scot %p our)/llmproxy-node/(scot %da now)/telemetry/noun
+        ==
+      ?~(scried ~ u.scried)
+    ::
     ::  Build the cards to apply a new policy: poke node, render UI.
     ++  policy-cards
       |=  $:  our=@p
@@ -110,13 +156,16 @@
               backend-key-set=?
               client-api-token-set=?
               hosting=?
+              now=@da
+              client-telemetry=(list client-telemetry-entry:llmproxy)
           ==
       ^-  (list card)
       =/  poke-card=card
         [%pass /set-policy %agent [our %llmproxy-node] %poke %noun !>([%set-policy new-pol])]
+      =/  node-tel  (scry-node-telemetry our now hosting)
       =/  http-cards
         %+  give-simple-payload:app:server  eid
-        (manx-response (ui-page our publisher api-base node models backend backend-key-set client-api-token-set new-pol hosting 'policy updated' '' ''))
+        (manx-response (ui-page our publisher api-base node models backend backend-key-set client-api-token-set new-pol hosting now client-telemetry node-tel 'policy updated' '' ''))
       [poke-card http-cards]
     ::
     ::  Build the config UI page.
@@ -131,6 +180,9 @@
               client-api-token-set=?
               =access-policy:llmproxy
               hosting=?
+              now=@da
+              client-telemetry=(list client-telemetry-entry:llmproxy)
+              node-telemetry=(list node-telemetry-entry:llmproxy)
               msg=@t
               test-prompt=@t
               test-response=@t
@@ -211,6 +263,13 @@
         small \{color:#888}
         ol li \{margin:.3em 0}
         code \{background:#eee;padding:.05em .35em;border-radius:3px;font-size:.9em;font-family:ui-monospace,Menlo,monospace}
+        .tel-table \{width:100%;border-collapse:collapse;font-size:.82em;font-family:ui-monospace,Menlo,monospace;margin:.4em 0 1.2em 0;display:block;overflow-x:auto}
+        .tel-table th, .tel-table td \{padding:.3em .55em;border-bottom:1px solid #ececec;text-align:left;white-space:nowrap}
+        .tel-table th \{color:#666;font-weight:600;text-transform:uppercase;font-size:.78em;letter-spacing:.05em;background:#f7f7f5}
+        .tel-table tbody tr:hover \{background:#fafaf8}
+        .tel-ok \{color:#3aa37a}
+        .tel-err \{color:#b54a4a}
+        .tel-empty \{color:#888;font-style:italic;margin:.4em 0}
         """
       ;html
         ;head
@@ -412,6 +471,84 @@
                 ==
               ==
           ==
+          ;details
+            ;summary: Telemetry
+            ;p
+              ;small: Last 20 requests on each side, newest first. Reload to refresh. Bodies, prompts, and tokens are never recorded.
+            ==
+            ;h3: Client (HTTP requests this ship received)
+            ;+  ?:  =(~ client-telemetry)
+                  ;p(class "tel-empty"): no requests recorded yet
+                ;table(class "tel-table")
+                  ;thead
+                    ;tr
+                      ;th: age
+                      ;th: endpoint
+                      ;th: target
+                      ;th: model
+                      ;th: stream
+                      ;th: auth
+                      ;th: status
+                      ;th: ms
+                      ;th: resp
+                    ==
+                  ==
+                  ;tbody
+                    ;*  %+  turn  client-telemetry
+                        |=  e=client-telemetry-entry:llmproxy
+                        =/  st=tape  ?:(?=(%ok status.e) "tel-ok" "tel-err")
+                        ;tr
+                          ;td:"{(trip (format-age now time.e))}"
+                          ;td:"{(trip `@t`endpoint.e)}"
+                          ;td:"{(scow %p target.e)}"
+                          ;td:"{(trip model.e)}"
+                          ;td:"{?:(stream.e "yes" "no")}"
+                          ;td:"{(trip (authed-text authed.e))}"
+                          ;td(class "{st}"):"{(trip (client-status-text status.e))}"
+                          ;td:"{(trip (format-ms latency-ms.e))}"
+                          ;td:"{(trip (format-bytes resp-bytes.e))}"
+                        ==
+                  ==
+                ==
+            ;+  ?.  hosting  ;span;
+                ;div
+                  ;h3: Node (jobs this ship's node served)
+                  ;p
+                    ;small: Denied requests are not recorded — the denial path nacks the poke before state is written. They appear as "node rejected" entries in the client table on the requesting ship.
+                  ==
+                  ;+  ?:  =(~ node-telemetry)
+                        ;p(class "tel-empty"): no jobs recorded yet
+                      ;table(class "tel-table")
+                        ;thead
+                          ;tr
+                            ;th: age
+                            ;th: src
+                            ;th: model
+                            ;th: status
+                            ;th: code
+                            ;th: ms
+                            ;th: req
+                            ;th: resp
+                          ==
+                        ==
+                        ;tbody
+                          ;*  %+  turn  node-telemetry
+                              |=  e=node-telemetry-entry:llmproxy
+                              =/  st=tape  ?:(?=(%ok status.e) "tel-ok" "tel-err")
+                              ;tr
+                                ;td:"{(trip (format-age now time.e))}"
+                                ;td:"{(scow %p src.e)}"
+                                ;td:"{(trip model.e)}"
+                                ;td(class "{st}"):"{(trip (node-status-text status.e))}"
+                                ;td:"{(scow %ud http-code.e)}"
+                                ;td:"{(trip (format-ms latency-ms.e))}"
+                                ;td:"{(trip (format-bytes req-bytes.e))}"
+                                ;td:"{(trip (format-bytes resp-bytes.e))}"
+                              ==
+                        ==
+                      ==
+                ==
+          ==
           ;p
             ;small: %llmproxy-client
           ==
@@ -449,7 +586,7 @@
     ==
   :_  %=  this
           state
-        :*  %0
+        :*  %1
             nonce=0
             node=default-node
             models=~
@@ -460,6 +597,7 @@
             hosting=%.n
             pending=~
             pending-config=~
+            telemetry=~
         ==
       ==
   [bind-card watch-cards]
@@ -477,7 +615,25 @@
   =/  s  !<(versioned-state old-state)
   =.  state
     ?-  -.s
-      %0  s
+        %1  s
+    ::
+    ::  state-0 → state-1: drop any in-flight pending entries (their
+    ::  old shape lacks `started` and we can't reconstruct latency),
+    ::  init telemetry empty.
+        %0
+      :*  %1
+          nonce.s
+          node.s
+          models.s
+          backend.s
+          backend-key.s
+          client-api-token.s
+          policy.s
+          hosting.s
+          *(map @ud pending-client)
+          pending-config.s
+          *(list client-telemetry-entry:llmproxy)
+      ==
     ==
   `this
 ::
@@ -502,7 +658,7 @@
       =/  jr=job-req:llmproxy  [jid model.cmd (build-test-body model.cmd prompt.cmd)]
       =/  pat=path  /job/(scot %ud n)
       =/  rec=pending-client
-        [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='' ask-id='']
+        [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='' ask-id='' started=now.bowl]
       :_  %=  this
               nonce    n
               pending  (~(put by pending.state) n rec)
@@ -529,7 +685,7 @@
     =/  jr=job-req:llmproxy  [jid model.cmd body.cmd]
     =/  pat=path  /job/(scot %ud n)
     =/  rec=pending-client
-      ['' node.state model.cmd %.n %agent '' '' id.cmd]
+      ['' node.state model.cmd %.n %agent '' '' id.cmd now.bowl]
     :_  this(nonce n, pending (~(put by pending.state) n rec))
     :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
         [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -553,9 +709,10 @@
               /(scot %p our.bowl)/llmproxy-node/(scot %da now.bowl)/advertised/noun
           ==
         ?~(scried models.state u.scried)
+      =/  node-tel  (scry-node-telemetry our.bowl now.bowl hosting.state)
       :_  this(models fresh-models)
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state fresh-models backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state '' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state fresh-models backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel '' '' ''))
     ::
     ::  POST /llmproxy/ui — handle config form submissions
     ?:  ?&  ?=(%'POST' method.request)
@@ -566,17 +723,20 @@
         q.u.body.request
       =/  fields  (parse-form-body body)
       =/  act  (~(get by fields) 'action')
+      ::  Scry once per request for node telemetry; reused across branches
+      ::  that don't toggle hosting.
+      =/  node-tel  (scry-node-telemetry our.bowl now.bowl hosting.state)
       ?:  ?&  ?=(^ act)  =('set-node' u.act)  ==
         =/  raw  (~(get by fields) 'node')
         ?:  |(?=(~ raw) =('' u.raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'missing node value' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'missing node value' '' ''))
         =/  parsed  (slaw %p u.raw)
         ?~  parsed
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state (cat 3 'invalid @p: ' u.raw) '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel (cat 3 'invalid @p: ' u.raw) '' ''))
         =/  resub-cards=(list card)
           :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
               [%pass /models %agent [u.parsed %llmproxy-node] %watch /models]
@@ -596,7 +756,7 @@
         :_  this(node u.parsed, models fresh-models)
         %+  weld  resub-cards
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'node updated' '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base u.parsed fresh-models backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'node updated' '' ''))
       ?:  ?&  ?=(^ act)  =('generate-api-token' u.act)  ==
         ::  Eyre intercepts Authorization: Bearer 0v... as a session lookup,
         ::  so prefix with 'sk-' (and drop the 0v) to keep it out of that path.
@@ -604,19 +764,19 @@
           (cat 3 'sk-' (rsh [3 2] (scot %uv (sham eny.bowl))))
         :_  this(client-api-token new-token)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) %.y policy.state hosting.state (cat 3 'new api token (copy now, you cannot see it again): ' new-token) '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) %.y policy.state hosting.state now.bowl telemetry.state node-tel (cat 3 'new api token (copy now, you cannot see it again): ' new-token) '' ''))
       ?:  ?&  ?=(^ act)  =('set-client-api-token' u.act)  ==
         =/  raw  (~(get by fields) 'token')
         =/  tok=@t  ?~(raw '' u.raw)
         :_  this(client-api-token tok)
         %+  give-simple-payload:app:server  eyre-id
-        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' tok) policy.state hosting.state ?:(=('' tok) 'api token disabled' 'api token set') '' ''))
+        (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' tok) policy.state hosting.state now.bowl telemetry.state node-tel ?:(=('' tok) 'api token disabled' 'api token set') '' ''))
       ?:  ?&  ?=(^ act)  =('refresh-models' u.act)  ==
         =/  poke-card=card
           [%pass /refresh-models %agent [our.bowl %llmproxy-node] %poke %noun !>([%refresh-models ~])]
         =/  http-cards
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'refreshing models from backend...' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'refreshing models from backend...' '' ''))
         :_  this
         [poke-card http-cards]
       ::  Merged backend + api key form. Backend URL is required and always
@@ -636,7 +796,7 @@
         ?:  |(?=(~ raw-backend) =('' u.raw-backend))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'missing backend url' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'missing backend url' '' ''))
         =/  new-backend=@t  u.raw-backend
         =/  raw-key  (~(get by fields) 'key')
         =/  typed-key=@t  ?~(raw-key '' u.raw-key)
@@ -658,6 +818,7 @@
         ~[poke-card timeout-card]
       ?:  ?&  ?=(^ act)  =('toggle-hosting' u.act)  ==
         =/  new-hosting=?  !hosting.state
+        =/  new-node-tel  (scry-node-telemetry our.bowl now.bowl new-hosting)
         :_  this(hosting new-hosting)
         %+  give-simple-payload:app:server  eyre-id
         %-  manx-response
@@ -672,6 +833,9 @@
           !=('' client-api-token.state)
           policy.state
           new-hosting
+          now.bowl
+          telemetry.state
+          new-node-tel
           ?:(new-hosting 'hosting on' 'hosting off')
           ''
           ''
@@ -683,7 +847,7 @@
               %blacklist  [%whitelist ships.policy.state]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) hosting.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) hosting.state now.bowl telemetry.state)
       ?:  ?&  ?=(^ act)  =('set-policy-ships' u.act)  ==
         =/  raw  (~(get by fields) 'ships')
         =/  ship-strs=(list @t)
@@ -698,14 +862,14 @@
               %blacklist  [%blacklist ships]
           ==
         :_  this(policy np)
-        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) hosting.state)
+        (policy-cards our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base eyre-id np node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) hosting.state now.bowl telemetry.state)
       ?:  ?&  ?=(^ act)  =('test' u.act)  ==
         =/  prompt-raw  (~(get by fields) 'prompt')
         =/  model-raw  (~(get by fields) 'model')
         ?:  |(?=(~ prompt-raw) =('' u.prompt-raw))
           :_  this
           %+  give-simple-payload:app:server  eyre-id
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'enter a prompt to test' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'enter a prompt to test' '' ''))
         =/  model=@t
           ?~  model-raw
             ?~  models.state  'llama3.1:8b'
@@ -717,21 +881,26 @@
         =/  pat=path  /job/(scot %ud n)
         :_  %=  this
                 nonce    n
-                pending  (~(put by pending.state) n [eyre-id node.state model %.n %test u.prompt-raw api-base ''])
+                pending  (~(put by pending.state) n [eyre-id node.state model %.n %test u.prompt-raw api-base '' now.bowl])
             ==
         :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
             [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
         ==
       :_  this
       %+  give-simple-payload:app:server  eyre-id
-      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'unknown action' '' ''))
+      (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'unknown action' '' ''))
     ::  GET /llmproxy/v1/models
     ?:  ?&  ?=(%'GET' method.request)
             ?=([%llmproxy %v1 %models ~] site.rl)
         ==
+      =/  authed-state=?(%ok %none)
+        ?:(=('' client-api-token.state) %none %ok)
       ?.  (bearer-ok client-api-token.state header-list.request)
-        :_  this
-        (give-simple-payload:app:server eyre-id [[401 ~] `(as-octs:mimes:html '{"error":"unauthorized: invalid or missing Bearer token"}')])
+        =/  err-body=@t  '{"error":"unauthorized: invalid or missing Bearer token"}'
+        =/  entry=client-telemetry-entry:llmproxy
+          [now.bowl %models node.state 0 '' %.n %fail %unauthorized 0 (met 3 err-body)]
+        :_  this(telemetry (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state]))
+        (give-simple-payload:app:server eyre-id [[401 ~] `(as-octs:mimes:html err-body)])
       =/  fresh-models=(list @t)
         ?.  =(node.state our.bowl)  models.state
         =/  scried=(unit (list @t))
@@ -741,30 +910,42 @@
               /(scot %p our.bowl)/llmproxy-node/(scot %da now.bowl)/advertised/noun
           ==
         ?~(scried models.state u.scried)
-      :_  this(models fresh-models)
+      =/  resp-json=json  (build-models-response fresh-models)
+      =/  resp-body=@t  (en:json:html resp-json)
+      =/  entry=client-telemetry-entry:llmproxy
+        [now.bowl %models node.state 0 '' %.n authed-state %ok 0 (met 3 resp-body)]
+      :_  this(models fresh-models, telemetry (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state]))
       %+  give-simple-payload:app:server  eyre-id
-      (json-response:gen:server (build-models-response fresh-models))
+      (json-response:gen:server resp-json)
     ::  POST /llmproxy/v1/chat/completions
     ?:  ?&  ?=(%'POST' method.request)
             ?=([%llmproxy %v1 %chat %completions ~] site.rl)
         ==
+      =/  authed-state=?(%ok %none)
+        ?:(=('' client-api-token.state) %none %ok)
       ?.  (bearer-ok client-api-token.state header-list.request)
-        :_  this
-        (give-simple-payload:app:server eyre-id [[401 ~] `(as-octs:mimes:html '{"error":"unauthorized: invalid or missing Bearer token"}')])
+        =/  err-body=@t  '{"error":"unauthorized: invalid or missing Bearer token"}'
+        =/  entry=client-telemetry-entry:llmproxy
+          [now.bowl %chat node.state 0 '' %.n %fail %unauthorized 0 (met 3 err-body)]
+        :_  this(telemetry (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state]))
+        (give-simple-payload:app:server eyre-id [[401 ~] `(as-octs:mimes:html err-body)])
       =/  body=@t
         ?~  body.request  ''
         q.u.body.request
       =/  parsed  (parse-openai-request body)
       ?~  parsed
-        :_  this
-        (give-simple-payload:app:server eyre-id [[400 ~] `(as-octs:mimes:html '{"error":"bad request"}')])
+        =/  err-body=@t  '{"error":"bad request"}'
+        =/  entry=client-telemetry-entry:llmproxy
+          [now.bowl %chat node.state 0 '' %.n authed-state %bad-request 0 (met 3 err-body)]
+        :_  this(telemetry (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state]))
+        (give-simple-payload:app:server eyre-id [[400 ~] `(as-octs:mimes:html err-body)])
       =/  n=@ud  +(nonce.state)
       =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
       =/  jr=job-req:llmproxy  [jid model.u.parsed body.u.parsed]
       =/  pat=path  /job/(scot %ud n)
       :_  %=  this
               nonce    n
-              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai '' api-base ''])
+              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai '' api-base '' now.bowl])
           ==
       :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -810,12 +991,13 @@
         ::  now with this fresh list. We don't try to filter by "fact in
         ::  response to my refresh vs. unrelated" — any fresh /models fact
         ::  reflects the latest node state, which is what the user wanted.
+        =/  node-tel  (scry-node-telemetry our.bowl now.bowl hosting.state)
         =/  http-cards=(list card)
           %-  zing
           %+  turn  ~(tap by pending-config.state)
           |=  [n=@ud entry=[eyre-id=@ta api-base=@t]]
           %+  give-simple-payload:app:server  eyre-id.entry
-          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.entry node.state ms backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'backend updated and models refreshed' '' ''))
+          (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.entry node.state ms backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'backend updated and models refreshed' '' ''))
         :_  this(models ms, pending-config ~)
         http-cards
       ==
@@ -841,9 +1023,27 @@
         :~  leave-card
             [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-ask-error !>([ask-id.u.rec 'node rejected or unreachable'])]
         ==
-      :_  this(pending (~(del by pending.state) n))
+      =/  err-body=@t  '{"error":"poke rejected by node (likely access policy)"}'
+      =/  new-telemetry=(list client-telemetry-entry:llmproxy)
+        ?.  ?=(%openai kind.u.rec)  telemetry.state
+        =/  authed-state=?(%ok %none)
+          ?:(=('' client-api-token.state) %none %ok)
+        =/  entry=client-telemetry-entry:llmproxy
+          :*  now.bowl
+              %chat
+              target.u.rec
+              n
+              model.u.rec
+              stream.u.rec
+              authed-state
+              %node-rejected
+              (elapsed-ms now.bowl started.u.rec)
+              (met 3 err-body)
+          ==
+        (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state])
+      :_  this(pending (~(del by pending.state) n), telemetry new-telemetry)
       :-  leave-card
-      (give-simple-payload:app:server eyre-id.u.rec [[403 ~] `(as-octs:mimes:html '{"error":"poke rejected by node (likely access policy)"}')])
+      (give-simple-payload:app:server eyre-id.u.rec [[403 ~] `(as-octs:mimes:html err-body)])
     ==
   ::
       [%watch @ ~]
@@ -861,8 +1061,26 @@
       ?:  ?=(%agent kind.u.rec)
         :_  this(pending (~(del by pending.state) n))
         [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-ask-error !>([ask-id.u.rec 'node unreachable'])]~
-      :_  this(pending (~(del by pending.state) n))
-      (give-simple-payload:app:server eyre-id.u.rec [[502 ~] `(as-octs:mimes:html '{"error":"node unreachable"}')])
+      =/  err-body=@t  '{"error":"node unreachable"}'
+      =/  new-telemetry=(list client-telemetry-entry:llmproxy)
+        ?.  ?=(%openai kind.u.rec)  telemetry.state
+        =/  authed-state=?(%ok %none)
+          ?:(=('' client-api-token.state) %none %ok)
+        =/  entry=client-telemetry-entry:llmproxy
+          :*  now.bowl
+              %chat
+              target.u.rec
+              n
+              model.u.rec
+              stream.u.rec
+              authed-state
+              %node-unreachable
+              (elapsed-ms now.bowl started.u.rec)
+              (met 3 err-body)
+          ==
+        (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state])
+      :_  this(pending (~(del by pending.state) n), telemetry new-telemetry)
+      (give-simple-payload:app:server eyre-id.u.rec [[502 ~] `(as-octs:mimes:html err-body)])
     ::
         %kick
       `this
@@ -889,6 +1107,7 @@
             `(as-octs:mimes:html text.tc)
           ::
               %test
+            =/  node-tel  (scry-node-telemetry our.bowl now.bowl hosting.state)
             %+  give-simple-payload:app:server  eyre-id.u.rec
             %-  manx-response
             %:  ui-page
@@ -902,6 +1121,9 @@
               !=('' client-api-token.state)
               policy.state
               hosting.state
+              now.bowl
+              telemetry.state
+              node-tel
               'test response below'
               prompt.u.rec
               (extract-content text.tc)
@@ -917,7 +1139,24 @@
             ::  and runs its own choices[0].message.content extraction.
             [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-token !>(tc)]~
           ==
-        :_  this(pending (~(del by pending.state) n))
+        =/  new-telemetry=(list client-telemetry-entry:llmproxy)
+          ?.  ?=(%openai kind.u.rec)  telemetry.state
+          =/  authed-state=?(%ok %none)
+            ?:(=('' client-api-token.state) %none %ok)
+          =/  entry=client-telemetry-entry:llmproxy
+            :*  now.bowl
+                %chat
+                target.u.rec
+                n
+                model.u.rec
+                stream.u.rec
+                authed-state
+                %ok
+                (elapsed-ms now.bowl started.u.rec)
+                (met 3 text.tc)
+            ==
+          (scag telemetry-cap `(list client-telemetry-entry:llmproxy)`[entry telemetry.state])
+        :_  this(pending (~(del by pending.state) n), telemetry new-telemetry)
         [leave-card cards]
       ==
     ==
@@ -938,9 +1177,10 @@
     =/  n=@ud  (slav %ud i.t.wire)
     =/  entry  (~(get by pending-config.state) n)
     ?~  entry  `this
+    =/  node-tel  (scry-node-telemetry our.bowl now.bowl hosting.state)
     :_  this(pending-config (~(del by pending-config.state) n))
     %+  give-simple-payload:app:server  eyre-id.u.entry
-    (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.u.entry node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state 'backend updated; model refresh still pending, reload to check' '' ''))
+    (manx-response (ui-page our.bowl (pub-of-llmproxy our.bowl now.bowl) api-base.u.entry node.state models.state backend.state !=('' backend-key.state) !=('' client-api-token.state) policy.state hosting.state now.bowl telemetry.state node-tel 'backend updated; model refresh still pending, reload to check' '' ''))
   (on-arvo:def wire sign-arvo)
 ::
 ++  on-leave  on-leave:def
@@ -949,8 +1189,9 @@
   |=  =path
   ^-  (unit (unit cage))
   ?+  path  (on-peek:def path)
-      [%x %jobs ~]   ``noun+!>(pending.state)
-      [%x %node ~]   ``noun+!>(node.state)
+      [%x %jobs ~]       ``noun+!>(pending.state)
+      [%x %node ~]       ``noun+!>(node.state)
+      [%x %telemetry ~]  ``noun+!>(telemetry.state)
   ==
 ++  on-fail   on-fail:def
 --
