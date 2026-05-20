@@ -114,7 +114,7 @@
       ~|  "llmproxy-node: access denied for {<src.bowl>} under policy {<-.policy>}"
       !!
     =/  jr  !<(job-req:llmproxy vase)
-    =/  body=@t  (build-body model.jr prompt.jr)
+    =/  body=@t  (build-body body.jr)
     =/  =request:http
       :*  method=%'POST'
           url=backend-url
@@ -169,9 +169,8 @@
       =/  body-text=@t
         ?~  r.rep  ''
         q.u.r.rep
-      =/  text=@t  (extract-content body-text)
       =/  pat=path  /job/(scot %ud n)
-      =/  tc=token-chunk:llmproxy  [jid.u.rec 0 text &]
+      =/  tc=token-chunk:llmproxy  [jid.u.rec 0 body-text &]
       :_  this(pending (~(del by pending) n))
       :~  [%give %fact ~[pat] %llmproxy-token !>(tc)]
           [%give %kick ~[pat] ~]

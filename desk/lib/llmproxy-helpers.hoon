@@ -153,12 +153,13 @@
 ::  Parse incoming OpenAI chat-completion request body. Returns ~ if
 ::  the body is malformed or missing required fields.
 ::
-::  `prompt` carries the full `messages` array re-serialized as JSON so
-::  the backend sees the whole conversation, not just the latest user
-::  turn. The wire field is named `prompt` for historical reasons.
+::  `model` and `stream` are extracted for client-side routing and for
+::  deciding SSE vs JSON response framing. `body` is the verbatim input
+::  forwarded to the node — tools, tool_choice, temperature, seed,
+::  response_format, etc. all pass through untouched.
 ++  parse-openai-request
   |=  body=@t
-  ^-  (unit [model=@t prompt=@t stream=?])
+  ^-  (unit [model=@t body=@t stream=?])
   =/  jon=(unit json)  (de:json:html body)
   ?~  jon  ~
   ?.  ?=([%o *] u.jon)  ~
@@ -173,7 +174,7 @@
     =/  s=(unit json)  (~(get by p.u.jon) 'stream')
     ?~  s  %.n
     ?.(?=([%b *] u.s) %.n p.u.s)
-  `[p.u.m (en:json:html u.msgs) stream]
+  `[p.u.m body stream]
 ::                                                  ::
 ::::                  backend / models discovery    ::
 ::                                                  ::
@@ -235,40 +236,39 @@
 ::                                                  ::
 ::::                  http body builders            ::
 ::                                                  ::
-::  Build the JSON body for a (non-streaming) chat-completions request
-::  to the backend. `prompt` is a pre-serialized JSON `messages` array
-::  (see parse-openai-request and wrap-user-prompt); we parse it back
-::  to a json value so we can rebuild the outgoing body with proper
-::  escaping. If the cord doesn't parse as a JSON array, fall back to
-::  an empty messages list rather than 500ing.
+::  Build the JSON body for the backend chat-completions request by
+::  taking the client's body verbatim and overlaying `stream: false`
+::  (Iris buffers the full response anyway, so streaming upstream is
+::  pointless and would force us to parse SSE on the way back). If the
+::  cord doesn't parse as a JSON object, pass it through unchanged so
+::  the backend can decide what error to return.
 ++  build-body
-  |=  [model=@t prompt=@t]
+  |=  body=@t
   ^-  @t
-  =/  parsed=(unit json)  (de:json:html prompt)
-  =/  msgs=json
-    ?~  parsed  a+~
-    ?.(?=([%a *] u.parsed) a+~ u.parsed)
-  =/  jon=json
-    %-  pairs:enjs:format
-    :~  ['model'^s+model]
-        ['stream'^b+%.n]
-        ['messages'^msgs]
-    ==
-  (en:json:html jon)
+  =/  parsed=(unit json)  (de:json:html body)
+  ?~  parsed  body
+  ?.  ?=([%o *] u.parsed)  body
+  (en:json:html [%o (~(put by p.u.parsed) 'stream' b+%.n)])
 ::
-::  Wrap a single user-prompt string into a JSON messages-array cord, so
-::  the dojo `[%ask ...]` helper and the UI test form can share the same
-::  wire format as a real OpenAI chat request (which carries the whole
-::  conversation, not just one turn).
-++  wrap-user-prompt
-  |=  prompt=@t
+::  Build a minimal OpenAI request body from a single user-prompt
+::  string. Used by the dojo `[%ask ...]` helper and the UI test form,
+::  both of which exist for connectivity testing and don't carry a
+::  full conversation. Real OpenAI clients hit the HTTP endpoint and
+::  bypass this — their bodies are forwarded verbatim by build-body.
+++  build-test-body
+  |=  [model=@t prompt=@t]
   ^-  @t
   =/  msg=json
     %-  pairs:enjs:format
     :~  ['role'^s+'user']
         ['content'^s+prompt]
     ==
-  (en:json:html a+~[msg])
+  =/  jon=json
+    %-  pairs:enjs:format
+    :~  ['model'^s+model]
+        ['messages'^a+~[msg]]
+    ==
+  (en:json:html jon)
 ::
 ::  Build header-list with optional Authorization Bearer.
 ++  build-headers
@@ -280,44 +280,38 @@
   ?:  =('' api-key)  base
   [['authorization'^(rap 3 ~['Bearer ' api-key])] base]
 ::
-::  Build the non-streaming chat.completion JSON response.
-++  build-completion-json
-  |=  [model=@t content=@t]
-  ^-  json
-  %-  pairs:enjs:format
-  :~  ['id'^s+'chatcmpl-urbit']
-      ['object'^s+'chat.completion']
-      ['model'^s+model]
-      :-  'choices'
-      :-  %a
-      :~  %-  pairs:enjs:format
-          :~  ['index'^(numb:enjs:format 0)]
-              :-  'message'
-              %-  pairs:enjs:format
-              :~  ['role'^s+'assistant']
-                  ['content'^s+content]
-              ==
-              ['finish_reason'^s+'stop']
-          ==
-      ==
-  ==
-::
-::  Build the SSE body: one delta chunk with full content + [DONE].
+::  Build the SSE body for clients that requested `stream: true`. The
+::  proxy never actually streams (Iris buffers fully) so we wrap the
+::  whole backend response into a single delta chunk + [DONE]. We
+::  forward the full `choices[0].message` object as the delta so
+::  tool_calls and any future message fields ride along; a content-only
+::  delta would silently drop tool_calls.
 ++  build-sse-body
-  |=  [model=@t content=@t]
+  |=  [model=@t backend-body=@t]
   ^-  @t
+  =/  msg=json
+    =/  parsed=(unit json)  (de:json:html backend-body)
+    ?~  parsed  ~
+    ?.  ?=([%o *] u.parsed)  ~
+    =/  cs=(unit json)  (~(get by p.u.parsed) 'choices')
+    ?~  cs  ~
+    ?.  ?=([%a *] u.cs)  ~
+    ?~  p.u.cs  ~
+    ?.  ?=([%o *] i.p.u.cs)  ~
+    =/  m=(unit json)  (~(get by p.i.p.u.cs) 'message')
+    ?~  m  ~
+    u.m
   =/  delta-jon=json
     %-  pairs:enjs:format
-    :~  ['object'^s+'chat.completion.chunk']
+    :~  ['id'^s+'chatcmpl-urbit']
+        ['object'^s+'chat.completion.chunk']
         ['model'^s+model]
         :-  'choices'
         :-  %a
         :~  %-  pairs:enjs:format
             :~  ['index'^(numb:enjs:format 0)]
-                :-  'delta'
-                %-  pairs:enjs:format
-                :~  ['content'^s+content]
-                ==
+                ['delta'^msg]
+                ['finish_reason'^s+'stop']
             ==
         ==
     ==

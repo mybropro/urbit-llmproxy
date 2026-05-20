@@ -187,19 +187,14 @@
 ::                                                  ::
 ++  test-parse-openai-request-basic
   ^-  tang
-  =/  body  '{"model":"llama3.1:8b","messages":[{"role":"user","content":"hi"}]}'
-  =/  parsed  (parse-openai-request:lph body)
+  =/  in-body  '{"model":"llama3.1:8b","messages":[{"role":"user","content":"hi"}]}'
+  =/  parsed  (parse-openai-request:lph in-body)
   ?~  parsed  ['expected parsed result, got ~']~
-  ::  prompt is the re-serialized messages JSON; round-trip to avoid
-  ::  pinning the encoder's key order.
-  =/  reparsed=(unit json)  (de:json:html prompt.u.parsed)
-  ?~  reparsed  ['expected re-parseable JSON in prompt']~
   ;:  weld
     %+  expect-eq  !>('llama3.1:8b')  !>(model.u.parsed)
     %+  expect-eq  !>(%.n)            !>(stream.u.parsed)
-    %+  expect-eq
-      !>(`json`a+~[(pairs:enjs:format ~[['role'^s+'user'] ['content'^s+'hi']])])
-      !>(u.reparsed)
+    ::  body is forwarded verbatim.
+    %+  expect-eq  !>(in-body)        !>(body.u.parsed)
   ==
 ::
 ++  test-parse-openai-request-stream-true
@@ -209,22 +204,16 @@
   ?~  parsed  ['expected parsed result, got ~']~
   %+  expect-eq  !>(%.y)  !>(stream.u.parsed)
 ::
-::  Multi-turn conversations must survive parse: the whole messages array
-::  is re-serialized into `prompt`, not just the last user message.
-::  Regression for the proxy-collapses-history bug.
-++  test-parse-openai-request-preserves-history
+::  Multi-turn conversations and any other OpenAI fields (tools, temperature,
+::  response_format, etc.) must survive parse. The whole client body is
+::  forwarded verbatim — parse-openai-request never rewrites it.
+::  Regression for the proxy-strips-fields bug.
+++  test-parse-openai-request-forwards-body-verbatim
   ^-  tang
-  =/  body
-    '{"model":"m","messages":[{"role":"user","content":"first"},{"role":"assistant","content":"reply"},{"role":"user","content":"second"}]}'
-  =/  parsed  (parse-openai-request:lph body)
+  =/  in-body  '{"model":"m","messages":[{"role":"user","content":"What is the weather?"}],"tools":[{"type":"function","function":{"name":"get_weather"}}],"temperature":0.7}'
+  =/  parsed  (parse-openai-request:lph in-body)
   ?~  parsed  ['expected parsed result, got ~']~
-  ::  Round-trip the serialized cord back through the JSON parser and check
-  ::  it's a 3-element array — string-comparison is fragile against key
-  ::  ordering in the encoder.
-  =/  reparsed=(unit json)  (de:json:html prompt.u.parsed)
-  ?~  reparsed  ['expected re-parseable JSON in prompt']~
-  ?.  ?=([%a *] u.reparsed)  ['expected JSON array in prompt']~
-  %+  expect-eq  !>(3)  !>((lent p.u.reparsed))
+  %+  expect-eq  !>(in-body)  !>(body.u.parsed)
 ::
 ++  test-parse-openai-request-malformed
   ^-  tang
@@ -241,6 +230,31 @@
     ::  empty messages
     %+  expect-eq  !>(`(unit [@t @t ?])`~)
       !>((parse-openai-request:lph '{"model":"m","messages":[]}'))
+  ==
+::
+::  build-body must overlay stream:false but leave every other field
+::  alone — including arbitrary fields the proxy doesn't know about.
+++  test-build-body-overlays-stream-false
+  ^-  tang
+  =/  in-body  '{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f"}],"temperature":0.5,"stream":true}'
+  =/  out=(unit json)  (de:json:html (build-body:lph in-body))
+  ?~  out  ['expected re-parseable JSON in output']~
+  ?.  ?=([%o *] u.out)  ['expected JSON object']~
+  ;:  weld
+    ::  stream coerced to false
+    %+  expect-eq
+      !>(`(unit json)`(some b+%.n))
+      !>((~(get by p.u.out) 'stream'))
+    ::  every other field preserved
+    %+  expect-eq
+      !>(`(unit json)`(some s+'m'))
+      !>((~(get by p.u.out) 'model'))
+    %+  expect-eq
+      !>(`(unit json)`(some n+'0.5'))
+      !>((~(get by p.u.out) 'temperature'))
+    %+  expect-eq
+      !>(`(unit json)`(some a+~[(pairs:enjs:format ~[['name'^s+'f']])]))
+      !>((~(get by p.u.out) 'tools'))
   ==
 ::                                                  ::
 ::::                  models discovery              ::

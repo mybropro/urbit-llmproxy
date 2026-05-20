@@ -50,10 +50,11 @@
 =*  state  -
 ::
 =>  |%
-    ::  Pure helpers (parse-openai-request, build-completion-json,
-    ::  build-sse-body, build-models-response, parse-form-body, trim-spaces,
-    ::  csv-to-list, list-to-csv, ships-to-csv, get-header, bearer-ok,
-    ::  derive-api-base, policy-mode-text, policy-ships-csv) live in
+    ::  Pure helpers (parse-openai-request, build-test-body,
+    ::  build-sse-body, build-models-response, extract-content,
+    ::  parse-form-body, trim-spaces, csv-to-list, list-to-csv,
+    ::  ships-to-csv, get-header, bearer-ok, derive-api-base,
+    ::  policy-mode-text, policy-ships-csv) live in
     ::  /lib/llmproxy-helpers.hoon and are imported via /+ above.
     ::
     ++  sse-cards
@@ -483,7 +484,7 @@
         %ask
       =/  n=@ud  +(nonce.state)
       =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
-      =/  jr=job-req:llmproxy  [jid model.cmd (wrap-user-prompt prompt.cmd)]
+      =/  jr=job-req:llmproxy  [jid model.cmd (build-test-body model.cmd prompt.cmd)]
       =/  pat=path  /job/(scot %ud n)
       =/  rec=pending-client
         [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='']
@@ -674,7 +675,7 @@
           u.model-raw
         =/  n=@ud  +(nonce.state)
         =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
-        =/  jr=job-req:llmproxy  [jid model (wrap-user-prompt u.prompt-raw)]
+        =/  jr=job-req:llmproxy  [jid model (build-test-body model u.prompt-raw)]
         =/  pat=path  /job/(scot %ud n)
         :_  %=  this
                 nonce    n
@@ -721,11 +722,11 @@
         (give-simple-payload:app:server eyre-id [[400 ~] `(as-octs:mimes:html '{"error":"bad request"}')])
       =/  n=@ud  +(nonce.state)
       =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
-      =/  jr=job-req:llmproxy  [jid model.u.parsed prompt.u.parsed]
+      =/  jr=job-req:llmproxy  [jid model.u.parsed body.u.parsed]
       =/  pat=path  /job/(scot %ud n)
       :_  %=  this
               nonce    n
-              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai prompt.u.parsed api-base])
+              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai '' api-base])
           ==
       :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -827,7 +828,11 @@
               %openai
             ?:  stream.u.rec
               (sse-cards eyre-id.u.rec (build-sse-body model.u.rec text.tc))
-            (give-simple-payload:app:server eyre-id.u.rec (json-response:gen:server (build-completion-json model.u.rec text.tc)))
+            ::  Forward the backend's chat-completion response verbatim
+            ::  so tool_calls, usage, finish_reason, etc. ride along.
+            %+  give-simple-payload:app:server  eyre-id.u.rec
+            :-  [200 ['content-type'^'application/json']~]
+            `(as-octs:mimes:html text.tc)
           ::
               %test
             %+  give-simple-payload:app:server  eyre-id.u.rec
@@ -845,11 +850,11 @@
               hosting.state
               'test response below'
               prompt.u.rec
-              text.tc
+              (extract-content text.tc)
             ==
           ::
               %dojo
-            ~&  >  [%llmproxy-response target=target.u.rec model=model.u.rec text=text.tc]
+            ~&  >  [%llmproxy-response target=target.u.rec model=model.u.rec text=(extract-content text.tc)]
             *(list card)
           ==
         :_  this(pending (~(del by pending.state) n))
