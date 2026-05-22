@@ -22,9 +22,12 @@
       target=@p
       model=@t
       stream=?
-      kind=?(%openai %test %dojo)
+      kind=?(%openai %test %dojo %agent)
       prompt=@t
       api-base=@t
+      ::  caller's request id, set only for kind=%agent (the /ask-result/[id]
+      ::  path we answer on); '' for the http/test/dojo paths.
+      ask-id=@ta
   ==
 +$  state-0
   $:  %0
@@ -487,7 +490,7 @@
       =/  jr=job-req:llmproxy  [jid model.cmd (build-test-body model.cmd prompt.cmd)]
       =/  pat=path  /job/(scot %ud n)
       =/  rec=pending-client
-        [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='']
+        [eyre-id='' target.cmd model.cmd stream=%.n %dojo prompt.cmd api-base='' ask-id='']
       :_  %=  this
               nonce    n
               pending  (~(put by pending.state) n rec)
@@ -495,6 +498,29 @@
       :~  [%pass /poke/(scot %ud n) %agent [target.cmd %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [target.cmd %llmproxy-node] %watch pat]
       ==
+    ==
+  ::
+  ::  Programmatic ask: a same-ship agent (e.g. %papertrail) pokes us with the
+  ::  full OpenAI body and subscribes to /ask-result/[id]. We run the exact
+  ::  existing job machinery against the configured node and answer on that
+  ::  path. See docs/programmatic-ask.md.
+      %llmproxy-ask
+    =+  !<(cmd=ask-agent:llmproxy vase)
+    ::  SECURITY: a Gall poke isn't gated by the client-api-token the way the
+    ::  HTTP entrypoint is, so restrict this to agents on our own ship —
+    ::  otherwise a remote ship could use our proxy without the token gate.
+    ?>  =(src.bowl our.bowl)
+    =/  n=@ud  +(nonce.state)
+    =/  jid=job-id:llmproxy  [our.bowl now.bowl n]
+    ::  caller's body forwarded verbatim; callers don't pick nodes, so we
+    ::  always target the configured node.state.
+    =/  jr=job-req:llmproxy  [jid model.cmd body.cmd]
+    =/  pat=path  /job/(scot %ud n)
+    =/  rec=pending-client
+      ['' node.state model.cmd %.n %agent '' '' id.cmd]
+    :_  this(nonce n, pending (~(put by pending.state) n rec))
+    :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
+        [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
     ==
   ::
       %handle-http-request
@@ -679,7 +705,7 @@
         =/  pat=path  /job/(scot %ud n)
         :_  %=  this
                 nonce    n
-                pending  (~(put by pending.state) n [eyre-id node.state model %.n %test u.prompt-raw api-base])
+                pending  (~(put by pending.state) n [eyre-id node.state model %.n %test u.prompt-raw api-base ''])
             ==
         :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
             [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -726,7 +752,7 @@
       =/  pat=path  /job/(scot %ud n)
       :_  %=  this
               nonce    n
-              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai '' api-base])
+              pending  (~(put by pending.state) n [eyre-id node.state model.u.parsed stream.u.parsed %openai '' api-base ''])
           ==
       :~  [%pass /poke/(scot %ud n) %agent [node.state %llmproxy-node] %poke %llmproxy-job !>(jr)]
           [%pass /watch/(scot %ud n) %agent [node.state %llmproxy-node] %watch pat]
@@ -740,6 +766,10 @@
   |=  =path
   ^-  (quip card _this)
   ?:  ?=([%http-response *] path)  `this
+  ::  Programmatic-ask result subscriptions, local agents only (see on-poke).
+  ?:  ?=([%ask-result @ ~] path)
+    ?>  =(src.bowl our.bowl)
+    `this
   (on-watch:def path)
 ::
 ++  on-agent
@@ -792,6 +822,13 @@
         ~&  >>>  [%llmproxy-poke-rejected target=target.u.rec reason=u.p.sign]
         :_  this(pending (~(del by pending.state) n))
         [leave-card]~
+      ::  Programmatic ask: tell the caller on its result path so its state
+      ::  machine doesn't hang, then leave the (already-opened) watch.
+      ?:  ?=(%agent kind.u.rec)
+        :_  this(pending (~(del by pending.state) n))
+        :~  leave-card
+            [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-ask-error !>([ask-id.u.rec 'node rejected or unreachable'])]
+        ==
       :_  this(pending (~(del by pending.state) n))
       :-  leave-card
       (give-simple-payload:app:server eyre-id.u.rec [[403 ~] `(as-octs:mimes:html '{"error":"poke rejected by node (likely access policy)"}')])
@@ -807,6 +844,11 @@
       ?~  rec  `this
       ?:  ?=(%dojo kind.u.rec)
         `this(pending (~(del by pending.state) n))
+      ::  Programmatic ask: the watch never opened, so no leave is needed —
+      ::  just report the failure to the caller's result path.
+      ?:  ?=(%agent kind.u.rec)
+        :_  this(pending (~(del by pending.state) n))
+        [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-ask-error !>([ask-id.u.rec 'node unreachable'])]~
       :_  this(pending (~(del by pending.state) n))
       (give-simple-payload:app:server eyre-id.u.rec [[502 ~] `(as-octs:mimes:html '{"error":"node unreachable"}')])
     ::
@@ -856,6 +898,12 @@
               %dojo
             ~&  >  [%llmproxy-response target=target.u.rec model=model.u.rec text=(extract-content text.tc)]
             *(list card)
+          ::
+              %agent
+            ::  Forward the token-chunk verbatim on the caller's result path:
+            ::  it gets exactly what the HTTP path gets (usage, tool_calls, …)
+            ::  and runs its own choices[0].message.content extraction.
+            [%give %fact ~[[%ask-result ask-id.u.rec ~]] %llmproxy-token !>(tc)]~
           ==
         :_  this(pending (~(del by pending.state) n))
         [leave-card cards]
