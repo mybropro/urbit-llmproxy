@@ -23,6 +23,15 @@
       done=?
   ==
 ::
+::  Programmatic ask: a same-ship Gall agent pokes %llmproxy-client with an
+::  `ask-agent` (its own request `id`, a model, and the full OpenAI
+::  chat-completions `body`) and subscribes to /ask-result/[id]. It gets the
+::  backend response back as a %llmproxy-token fact (verbatim, same as the HTTP
+::  path), or an `ask-error` fact if the node rejected the job or was
+::  unreachable. See docs/programmatic-ask.md.
++$  ask-agent  [id=@ta model=@t body=@t]
++$  ask-error  [id=@ta reason=@t]
+::
 ::  Access policy enforced by %llmproxy-node on incoming job pokes.
 ::  In both modes, the node's own ship is always allowed.
 ::    %whitelist — deny everyone except `ships`
