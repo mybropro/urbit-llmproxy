@@ -47,6 +47,12 @@
       ::  render the same external URL the user originally hit.
       pending-config=(map @ud [eyre-id=@ta api-base=@t])
   ==
+::  Union of every state shape this agent has ever shipped. on-load casts
+::  the persisted state to this and migrates forward to the current shape.
+::  RULE: once a version ships, freeze its +$; any shape change adds a new
+::  +$ state-N (with a fresh %N tag) and a migration arm in on-load. Never
+::  reshape a tagged version in place — that breaks the cast on upgrade.
++$  versioned-state  $%(state-0)
 --
 ::
 =|  state-0
@@ -461,13 +467,19 @@
 ++  on-save  !>(state)
 ::
 ++  on-load
-  |=  =vase
+  |=  old-state=vase
   ^-  (quip card _this)
-  =/  loaded  (mole |.(!<(state-0 vase)))
-  ?~  loaded
-    ~&  >>  %llmproxy-client-reset-state
-    on-init
-  `this(state u.loaded)
+  ::  Versioned, non-destructive load — see llmproxy-node on-load for the
+  ::  full rationale. We never fall back to on-init: that silently resets
+  ::  the node target, client api token, advertised models, and the hosting
+  ::  flag back to defaults. Add a +$ state-N and an arm below per change;
+  ::  never reshape a shipped version in place.
+  =/  s  !<(versioned-state old-state)
+  =.  state
+    ?-  -.s
+      %0  s
+    ==
+  `this
 ::
 ++  on-poke
   |=  [=mark =vase]

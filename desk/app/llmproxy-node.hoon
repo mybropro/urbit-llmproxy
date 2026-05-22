@@ -22,6 +22,12 @@
       advertised=(list @t)
       pending=(map @ud pending-job)
   ==
+::  Union of every state shape this agent has ever shipped. on-load casts
+::  the persisted state to this and migrates forward to the current shape.
+::  RULE: once a version ships, freeze its +$; any shape change adds a new
+::  +$ state-N (with a fresh %N tag) and a migration arm in on-load. Never
+::  reshape a tagged version in place — that breaks the cast on upgrade.
++$  versioned-state  $%(state-0)
 --
 ::
 =|  state-0
@@ -61,16 +67,25 @@
 ++  on-save  !>(state)
 ::
 ++  on-load
-  |=  =vase
+  |=  old-state=vase
   ^-  (quip card _this)
-  =/  loaded  (mole |.(!<(state-0 vase)))
-  ?~  loaded
-    ~&  >>  %llmproxy-node-reset-state
-    on-init
+  ::  Versioned, non-destructive load. Hard-cast the persisted state to the
+  ::  union of every shipped version, then migrate forward. We deliberately
+  ::  do NOT fall back to on-init on a cast miss: a silent reinit wipes the
+  ::  operator's backend URL, backend key, and access policy (resetting the
+  ::  whitelist to deny everyone but our own ship). A failed load here is a
+  ::  loud, recoverable build error — fix the migration and re-commit; the
+  ::  old state is still in the snapshot. Add a +$ state-N and an arm below
+  ::  for any shape change.
+  =/  s  !<(versioned-state old-state)
+  =.  state
+    ?-  -.s
+      %0  s
+    ==
   ::  Re-arm the auto-refresh timer on every reload. Existing in-flight
   ::  timers from prior revisions still fire on this same wire; on-arvo
   ::  handles those harmlessly (refresh + reschedule).
-  :_  this(state u.loaded)
+  :_  this
   [%pass /refresh-tick %arvo %b %wait (add now.bowl ~m30)]~
 ::
 ++  on-poke
