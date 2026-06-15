@@ -649,7 +649,14 @@
           ==
       vase
     ?-    -.cmd
-        %set-node    `this(node target.cmd)
+    ::  re-point at a node AND (re)subscribe to its /models, so the advertised
+    ::  list stays populated (mirrors the HTML set-node path).
+        %set-node
+      :_  this(node target.cmd)
+      ^-  (list card:agent:gall)
+      :~  [%pass /models %agent [node.state %llmproxy-node] %leave ~]
+          [%pass /models %agent [target.cmd %llmproxy-node] %watch /models]
+      ==
         %set-models  `this(models ms.cmd)
     ::
         %ask
@@ -1192,6 +1199,7 @@
       [%x %jobs ~]       ``noun+!>(pending.state)
       [%x %node ~]       ``noun+!>(node.state)
       [%x %telemetry ~]  ``noun+!>(telemetry.state)
+      [%x %models ~]     ``noun+!>(models.state)
   ==
 ++  on-fail   on-fail:def
 --
