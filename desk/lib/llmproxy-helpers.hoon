@@ -193,6 +193,25 @@
     (cat 3 chat-url '/models')
   (cat 3 (end [3 (sub u-len s-len)] chat-url) '/models')
 ::
+::  Validate a backend chat URL before persisting it. The node POSTs job
+::  requests to this URL *verbatim*, so it must point all the way at the
+::  chat-completions endpoint. A bare base like `http://host/v1` silently
+::  breaks inference (the POST lands on the wrong path) while model
+::  discovery still works, because `derive-models-url` appends `/models`
+::  to any base — so an invalid URL looks healthy until the first chat.
+::  Reject anything that isn't http(s) and doesn't end in
+::  `/chat/completions`.
+++  valid-backend-url
+  |=  url=@t
+  ^-  ?
+  =/  suffix  '/chat/completions'
+  =/  s-len   (met 3 suffix)
+  =/  u-len   (met 3 url)
+  ?&  (gte u-len (add 7 s-len))           ::  room for 'http://' + suffix
+      =('http' (end [3 4] url))           ::  http:// or https:// scheme
+      =(suffix (rsh [3 (sub u-len s-len)] url))
+  ==
+::
 ::  Parse OpenAI-format /v1/models response body into a list of model
 ::  ids. Empty list on parse failure or missing data.
 ++  parse-models-list

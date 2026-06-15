@@ -273,6 +273,28 @@
     %+  expect-eq  !>('/models')  !>((derive-models-url:lph ''))
   ==
 ::
+++  test-valid-backend-url
+  ^-  tang
+  ;:  weld
+    ::  valid: full chat-completions endpoint, http and https
+    %+  expect-eq  !>(%.y)
+      !>((valid-backend-url:lph 'http://localhost:11434/v1/chat/completions'))
+    %+  expect-eq  !>(%.y)
+      !>((valid-backend-url:lph 'https://192.168.0.14:3001/v1/chat/completions'))
+    ::  invalid: bare base missing /chat/completions (the footgun — models
+    ::  discovery would still work, but chat POSTs would break)
+    %+  expect-eq  !>(%.n)
+      !>((valid-backend-url:lph 'http://192.168.0.14:3001/v1'))
+    ::  invalid: wrong suffix
+    %+  expect-eq  !>(%.n)
+      !>((valid-backend-url:lph 'http://host/v1/completions'))
+    ::  invalid: no scheme
+    %+  expect-eq  !>(%.n)
+      !>((valid-backend-url:lph 'localhost/v1/chat/completions'))
+    ::  invalid: empty
+    %+  expect-eq  !>(%.n)  !>((valid-backend-url:lph ''))
+  ==
+::
 ++  test-parse-models-list
   ^-  tang
   =/  body

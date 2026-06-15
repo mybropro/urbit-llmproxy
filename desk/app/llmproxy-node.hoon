@@ -125,6 +125,8 @@
       vase
     ?-    -.cmd
         %set-backend
+      ~|  "llmproxy-node: backend url must be http(s) and end in /chat/completions: {(trip url.cmd)}"
+      ?>  (valid-backend-url url.cmd)
       :_  this(backend-url url.cmd)
       [(refresh-models-card url.cmd backend-key)]~
     ::
@@ -136,6 +138,8 @@
     ::  merged "update backend" form uses this so it can defer its HTTP
     ::  response on a single /models fact rather than race two refreshes.
         %set-backend-and-key
+      ~|  "llmproxy-node: backend url must be http(s) and end in /chat/completions: {(trip url.cmd)}"
+      ?>  (valid-backend-url url.cmd)
       :_  this(backend-url url.cmd, backend-key key.cmd)
       [(refresh-models-card url.cmd key.cmd)]~
     ::
